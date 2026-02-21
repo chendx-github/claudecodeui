@@ -709,7 +709,6 @@ app.get('/api/projects/:projectName/file', authenticateToken, async (req, res) =
         const { projectName } = req.params;
         const { filePath } = req.query;
 
-        console.log('[DEBUG] File read request:', projectName, filePath);
 
         // Security: ensure the requested path is inside the project root
         if (!filePath) {
@@ -750,7 +749,6 @@ app.get('/api/projects/:projectName/files/content', authenticateToken, async (re
         const { projectName } = req.params;
         const { path: filePath } = req.query;
 
-        console.log('[DEBUG] Binary file serve request:', projectName, filePath);
 
         // Security: ensure the requested path is inside the project root
         if (!filePath) {
@@ -804,7 +802,6 @@ app.put('/api/projects/:projectName/file', authenticateToken, async (req, res) =
         const { projectName } = req.params;
         const { filePath, content } = req.body;
 
-        console.log('[DEBUG] File save request:', projectName, filePath);
 
         // Security: ensure the requested path is inside the project root
         if (!filePath) {
@@ -1945,6 +1942,9 @@ async function getFileTree(dirPath, maxDepth = 3, currentDepth = 0, showHidden =
 }
 
 const PORT = process.env.PORT || 3001;
+const HOST = process.env.HOST || '0.0.0.0';
+// Show localhost in URL when binding to all interfaces (0.0.0.0 isn't a connectable address)
+const DISPLAY_HOST = HOST === '0.0.0.0' ? 'localhost' : HOST;
 
 // Initialize database and start server
 async function startServer() {
@@ -1964,7 +1964,7 @@ async function startServer() {
             console.log(`${c.warn('[WARN]')} Note: Requests will be proxied to Vite dev server at ${c.dim('http://localhost:' + (process.env.VITE_PORT || 5173))}`);
         }
 
-        server.listen(PORT, '0.0.0.0', async () => {
+        server.listen(PORT, HOST, async () => {
             const appInstallPath = path.join(__dirname, '..');
 
             console.log('');
@@ -1972,7 +1972,7 @@ async function startServer() {
             console.log(`  ${c.bright('Claude Code UI Server - Ready')}`);
             console.log(c.dim('═'.repeat(63)));
             console.log('');
-            console.log(`${c.info('[INFO]')} Server URL:  ${c.bright('http://0.0.0.0:' + PORT)}`);
+            console.log(`${c.info('[INFO]')} Server URL:  ${c.bright('http://' + DISPLAY_HOST + ':' + PORT)}`);
             console.log(`${c.info('[INFO]')} Installed at: ${c.dim(appInstallPath)}`);
             console.log(`${c.tip('[TIP]')}  Run "cloudcli status" for full configuration details`);
             console.log('');
