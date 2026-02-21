@@ -55,7 +55,14 @@ function MainContent({
   externalMessageUpdate,
 }: MainContentProps) {
   const { preferences } = useUiPreferences();
-  const { autoExpandTools, showRawParameters, showThinking, autoScrollToBottom, sendByCtrlEnter } = preferences;
+  const {
+    autoExpandTools,
+    showRawParameters,
+    showThinking,
+    showInjectedContext,
+    autoScrollToBottom,
+    sendByCtrlEnter,
+  } = preferences;
 
   const { currentProject, setCurrentProject } = useTaskMaster() as TaskMasterContextValue;
   const { tasksEnabled, isTaskMasterInstalled } = useTasksSettings() as TasksSettingsContextValue;
@@ -131,6 +138,7 @@ function MainContent({
                 autoExpandTools={autoExpandTools}
                 showRawParameters={showRawParameters}
                 showThinking={showThinking}
+                showInjectedContext={showInjectedContext}
                 autoScrollToBottom={autoScrollToBottom}
                 sendByCtrlEnter={sendByCtrlEnter}
                 externalMessageUpdate={externalMessageUpdate}

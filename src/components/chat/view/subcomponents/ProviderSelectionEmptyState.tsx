@@ -17,6 +17,7 @@ interface ProviderSelectionEmptyStateProps {
   setCursorModel: (model: string) => void;
   codexModel: string;
   setCodexModel: (model: string) => void;
+  codexModelOptions: Array<{ value: string; label: string }>;
   tasksEnabled: boolean;
   isTaskMasterInstalled: boolean | null;
   onShowAllTasks?: (() => void) | null;
@@ -35,6 +36,7 @@ export default function ProviderSelectionEmptyState({
   setCursorModel,
   codexModel,
   setCodexModel,
+  codexModelOptions,
   tasksEnabled,
   isTaskMasterInstalled,
   onShowAllTasks,
@@ -43,6 +45,10 @@ export default function ProviderSelectionEmptyState({
   const { t } = useTranslation('chat');
   // Reuse one translated prompt so task-start behavior stays consistent across empty and session states.
   const nextTaskPrompt = t('tasks.nextTaskPrompt', { defaultValue: 'Start the next task' });
+  const customCodexOptionValue = '__custom_codex_model__';
+  const codexSelectValue = codexModelOptions.some(({ value }) => value === codexModel)
+    ? codexModel
+    : customCodexOptionValue;
 
   const selectProvider = (nextProvider: SessionProvider) => {
     setProvider(nextProvider);
@@ -156,21 +162,45 @@ export default function ProviderSelectionEmptyState({
                 ))}
               </select>
             ) : provider === 'codex' ? (
-              <select
-                value={codexModel}
-                onChange={(e) => {
-                  const newModel = e.target.value;
-                  setCodexModel(newModel);
-                  localStorage.setItem('codex-model', newModel);
-                }}
-                className="pl-4 pr-10 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500 min-w-[140px]"
-              >
-                {CODEX_MODELS.OPTIONS.map(({ value, label }) => (
-                  <option key={value} value={value}>
-                    {label}
+              <div className="flex flex-col items-center gap-2">
+                <select
+                  value={codexSelectValue}
+                  onChange={(e) => {
+                    const selectedModel = e.target.value;
+                    if (selectedModel === customCodexOptionValue) {
+                      return;
+                    }
+                    setCodexModel(selectedModel);
+                    localStorage.setItem('codex-model', selectedModel);
+                  }}
+                  className="pl-4 pr-10 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500 min-w-[220px]"
+                >
+                  {codexModelOptions.map(({ value, label }) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                  <option value={customCodexOptionValue}>
+                    {t('providerSelection.customCodexModel', { defaultValue: 'Custom model (edit below)' })}
                   </option>
-                ))}
-              </select>
+                </select>
+                <input
+                  type="text"
+                  value={codexModel}
+                  onChange={(e) => {
+                    const newModel = e.target.value.trim();
+                    setCodexModel(newModel);
+                    if (newModel) {
+                      localStorage.setItem('codex-model', newModel);
+                    } else {
+                      localStorage.removeItem('codex-model');
+                    }
+                  }}
+                  placeholder={CODEX_MODELS.DEFAULT}
+                  autoComplete="off"
+                  className="pl-4 pr-4 py-2 text-sm bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-gray-500 focus:border-gray-500 min-w-[220px]"
+                />
+              </div>
             ) : (
               <select
                 value={cursorModel}

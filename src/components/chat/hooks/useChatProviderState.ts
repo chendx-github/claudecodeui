@@ -8,6 +8,20 @@ interface UseChatProviderStateArgs {
   selectedSession: ProjectSession | null;
 }
 
+type ModelOption = {
+  value: string;
+  label: string;
+};
+
+function buildCodexModelOption(model: string): ModelOption {
+  const trimmedModel = model.trim();
+  const defaultOption = CODEX_MODELS.OPTIONS.find((option) => option.value === trimmedModel);
+  return {
+    value: trimmedModel,
+    label: defaultOption?.label || trimmedModel,
+  };
+}
+
 export function useChatProviderState({ selectedSession }: UseChatProviderStateArgs) {
   const [permissionMode, setPermissionMode] = useState<PermissionMode>('default');
   const [pendingPermissionRequests, setPendingPermissionRequests] = useState<PendingPermissionRequest[]>([]);
@@ -20,11 +34,47 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
   const [claudeModel, setClaudeModel] = useState<string>(() => {
     return localStorage.getItem('claude-model') || CLAUDE_MODELS.DEFAULT;
   });
-  const [codexModel, setCodexModel] = useState<string>(() => {
+  const [codexModelValue, setCodexModelValue] = useState<string>(() => {
     return localStorage.getItem('codex-model') || CODEX_MODELS.DEFAULT;
+  });
+  const [codexModelOptions, setCodexModelOptions] = useState<ModelOption[]>(() => {
+    const localModel = localStorage.getItem('codex-model');
+    if (!localModel?.trim()) {
+      return CODEX_MODELS.OPTIONS;
+    }
+
+    if (CODEX_MODELS.OPTIONS.some((option) => option.value === localModel.trim())) {
+      return CODEX_MODELS.OPTIONS;
+    }
+
+    return [...CODEX_MODELS.OPTIONS, buildCodexModelOption(localModel)];
   });
 
   const lastProviderRef = useRef(provider);
+
+  const ensureCodexModelOption = useCallback((model: string) => {
+    const trimmedModel = model.trim();
+    if (!trimmedModel) {
+      return;
+    }
+
+    setCodexModelOptions((previousOptions) => {
+      if (previousOptions.some((option) => option.value === trimmedModel)) {
+        return previousOptions;
+      }
+      return [...previousOptions, buildCodexModelOption(trimmedModel)];
+    });
+  }, []);
+
+  const setCodexModel = useCallback(
+    (model: string) => {
+      setCodexModelValue(model);
+      ensureCodexModelOption(model);
+    },
+    [ensureCodexModelOption],
+  );
+
+  const codexModel = codexModelValue;
 
   useEffect(() => {
     if (!selectedSession?.id) {
@@ -80,6 +130,43 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
       });
   }, [provider]);
 
+  useEffect(() => {
+    ensureCodexModelOption(codexModel);
+  }, [codexModel, ensureCodexModelOption]);
+
+  useEffect(() => {
+    if (provider !== 'codex') {
+      return;
+    }
+
+    let cancelled = false;
+    const localModel = localStorage.getItem('codex-model') || '';
+    ensureCodexModelOption(localModel);
+
+    authenticatedFetch('/api/codex/config')
+      .then((response) => response.json())
+      .then((data) => {
+        if (cancelled || !data.success) {
+          return;
+        }
+
+        const configModel = typeof data.config?.model === 'string' ? data.config.model : '';
+        ensureCodexModelOption(configModel);
+
+        if (!localModel.trim() && configModel.trim()) {
+          setCodexModelValue(configModel.trim());
+          localStorage.setItem('codex-model', configModel.trim());
+        }
+      })
+      .catch((error) => {
+        console.error('Error loading Codex config:', error);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [provider, ensureCodexModelOption]);
+
   const cyclePermissionMode = useCallback(() => {
     const modes: PermissionMode[] =
       provider === 'codex'
@@ -105,6 +192,7 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
     setClaudeModel,
     codexModel,
     setCodexModel,
+    codexModelOptions,
     permissionMode,
     setPermissionMode,
     pendingPermissionRequests,

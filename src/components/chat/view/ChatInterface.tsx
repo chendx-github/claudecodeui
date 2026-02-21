@@ -35,6 +35,7 @@ function ChatInterface({
   autoExpandTools,
   showRawParameters,
   showThinking,
+  showInjectedContext,
   autoScrollToBottom,
   sendByCtrlEnter,
   externalMessageUpdate,
@@ -64,6 +65,7 @@ function ChatInterface({
     setClaudeModel,
     codexModel,
     setCodexModel,
+    codexModelOptions,
     permissionMode,
     pendingPermissionRequests,
     setPendingPermissionRequests,
@@ -286,6 +288,7 @@ function ChatInterface({
           setCursorModel={setCursorModel}
           codexModel={codexModel}
           setCodexModel={setCodexModel}
+          codexModelOptions={codexModelOptions}
           tasksEnabled={tasksEnabled}
           isTaskMasterInstalled={isTaskMasterInstalled}
           onShowAllTasks={onShowAllTasks}
@@ -304,6 +307,7 @@ function ChatInterface({
           autoExpandTools={autoExpandTools}
           showRawParameters={showRawParameters}
           showThinking={showThinking}
+          showInjectedContext={showInjectedContext}
           selectedProject={selectedProject}
           isLoading={isLoading}
         />

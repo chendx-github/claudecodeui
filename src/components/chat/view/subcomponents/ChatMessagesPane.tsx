@@ -26,6 +26,7 @@ interface ChatMessagesPaneProps {
   setCursorModel: (model: string) => void;
   codexModel: string;
   setCodexModel: (model: string) => void;
+  codexModelOptions: Array<{ value: string; label: string }>;
   tasksEnabled: boolean;
   isTaskMasterInstalled: boolean | null;
   onShowAllTasks?: (() => void) | null;
@@ -44,6 +45,7 @@ interface ChatMessagesPaneProps {
   autoExpandTools?: boolean;
   showRawParameters?: boolean;
   showThinking?: boolean;
+  showInjectedContext?: boolean;
   selectedProject: Project;
   isLoading: boolean;
 }
@@ -65,6 +67,7 @@ export default function ChatMessagesPane({
   setCursorModel,
   codexModel,
   setCodexModel,
+  codexModelOptions,
   tasksEnabled,
   isTaskMasterInstalled,
   onShowAllTasks,
@@ -83,6 +86,7 @@ export default function ChatMessagesPane({
   autoExpandTools,
   showRawParameters,
   showThinking,
+  showInjectedContext,
   selectedProject,
   isLoading,
 }: ChatMessagesPaneProps) {
@@ -142,6 +146,7 @@ export default function ChatMessagesPane({
           setCursorModel={setCursorModel}
           codexModel={codexModel}
           setCodexModel={setCodexModel}
+          codexModelOptions={codexModelOptions}
           tasksEnabled={tasksEnabled}
           isTaskMasterInstalled={isTaskMasterInstalled}
           onShowAllTasks={onShowAllTasks}
@@ -193,6 +198,7 @@ export default function ChatMessagesPane({
                 autoExpandTools={autoExpandTools}
                 showRawParameters={showRawParameters}
                 showThinking={showThinking}
+                showInjectedContext={showInjectedContext}
                 selectedProject={selectedProject}
                 provider={provider}
               />
@@ -205,4 +211,3 @@ export default function ChatMessagesPane({
     </div>
   );
 }
-

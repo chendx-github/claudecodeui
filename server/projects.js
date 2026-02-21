@@ -384,10 +384,19 @@ async function getProjects(progressCallback = null) {
   const config = await loadProjectConfig();
   const projects = [];
   const existingProjects = new Set();
+  const knownProjectPaths = new Set();
   const codexSessionsIndexRef = { sessionsByProject: null };
   let totalProjects = 0;
   let processedProjects = 0;
   let directories = [];
+
+  // Build Codex sessions index up-front so we can auto-discover Codex-only projects.
+  try {
+    codexSessionsIndexRef.sessionsByProject = await buildCodexSessionsIndex();
+  } catch (error) {
+    console.warn('Could not build Codex sessions index:', error.message);
+    codexSessionsIndexRef.sessionsByProject = new Map();
+  }
 
   try {
     // Check if the .claude/projects directory exists
@@ -422,6 +431,10 @@ async function getProjects(progressCallback = null) {
 
         // Extract actual project directory from JSONL sessions
         const actualProjectDir = await extractProjectDirectory(entry.name);
+        const normalizedActualProjectPath = normalizeComparablePath(actualProjectDir);
+        if (normalizedActualProjectPath) {
+          knownProjectPaths.add(normalizedActualProjectPath);
+        }
         
         // Get display name from config or generate one
         const customName = config[entry.name]?.displayName;
@@ -533,6 +546,11 @@ async function getProjects(progressCallback = null) {
           actualProjectDir = projectName.replace(/-/g, '/');
         }
       }
+
+      const normalizedActualProjectPath = normalizeComparablePath(actualProjectDir);
+      if (normalizedActualProjectPath) {
+        knownProjectPaths.add(normalizedActualProjectPath);
+      }
       
       const project = {
           name: projectName,
@@ -595,6 +613,68 @@ async function getProjects(progressCallback = null) {
       projects.push(project);
     }
   }
+
+  // Auto-discover projects that only exist in Codex history (~/.codex/sessions)
+  for (const [normalizedProjectPath, codexSessions] of (codexSessionsIndexRef.sessionsByProject || new Map()).entries()) {
+    if (!normalizedProjectPath || knownProjectPaths.has(normalizedProjectPath)) {
+      continue;
+    }
+
+    if (!Array.isArray(codexSessions) || codexSessions.length === 0) {
+      continue;
+    }
+
+    const representativeSession = codexSessions.find(session => typeof session.cwd === 'string' && session.cwd.trim());
+    const actualProjectDir = representativeSession?.cwd ? path.resolve(representativeSession.cwd) : normalizedProjectPath;
+    const projectName = encodeProjectNameFromPath(actualProjectDir);
+
+    if (projects.some(project => normalizeComparablePath(project.fullPath || project.path) === normalizedProjectPath)) {
+      knownProjectPaths.add(normalizedProjectPath);
+      continue;
+    }
+
+    // Keep reverse lookup stable for follow-up API calls that resolve projectName -> path.
+    projectDirectoryCache.set(projectName, actualProjectDir);
+
+    const project = {
+      name: projectName,
+      path: actualProjectDir,
+      displayName: await generateDisplayName(projectName, actualProjectDir),
+      fullPath: actualProjectDir,
+      isAutoDiscovered: true,
+      sessions: [],
+      sessionMeta: {
+        hasMore: false,
+        total: 0
+      },
+      cursorSessions: [],
+      codexSessions: codexSessions.slice(0, 5)
+    };
+
+    try {
+      const taskMasterResult = await detectTaskMasterFolder(actualProjectDir);
+      project.taskmaster = {
+        hasTaskmaster: taskMasterResult.hasTaskmaster,
+        hasEssentialFiles: taskMasterResult.hasEssentialFiles,
+        metadata: taskMasterResult.metadata,
+        status: taskMasterResult.hasTaskmaster && taskMasterResult.hasEssentialFiles ? 'taskmaster-only' : 'not-configured'
+      };
+    } catch (error) {
+      project.taskmaster = {
+        status: 'error',
+        hasTaskmaster: false,
+        hasEssentialFiles: false,
+        error: error.message
+      };
+    }
+
+    knownProjectPaths.add(normalizedProjectPath);
+    projects.push(project);
+  }
+
+  // Keep progress metadata consistent with the final number of projects.
+  totalProjects = Math.max(totalProjects, projects.length);
+  processedProjects = Math.max(processedProjects, totalProjects);
 
   // Emit completion after all projects (including manual) are processed
   if (progressCallback) {
@@ -1110,7 +1190,7 @@ async function addProjectManually(projectPath, displayName = null) {
   }
 
   // Generate project name (encode path for use as directory name)
-  const projectName = absolutePath.replace(/[\\/:\s~_]/g, '-');
+  const projectName = encodeProjectNameFromPath(absolutePath);
 
   // Check if project already exists in config
   const config = await loadProjectConfig();
@@ -1145,6 +1225,10 @@ async function addProjectManually(projectPath, displayName = null) {
     sessions: [],
     cursorSessions: []
   };
+}
+
+function encodeProjectNameFromPath(projectPath) {
+  return path.resolve(projectPath).replace(/[\\/:\s~_]/g, '-');
 }
 
 // Fetch Cursor sessions for a given project path

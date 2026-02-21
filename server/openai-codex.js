@@ -1,22 +1,139 @@
 /**
- * OpenAI Codex SDK Integration
- * =============================
+ * OpenAI Codex CLI Integration
+ * ============================
  *
- * This module provides integration with the OpenAI Codex SDK for non-interactive
- * chat sessions. It mirrors the pattern used in claude-sdk.js for consistency.
- *
- * ## Usage
- *
- * - queryCodex(command, options, ws) - Execute a prompt with streaming via WebSocket
- * - abortCodexSession(sessionId) - Cancel an active session
- * - isCodexSessionActive(sessionId) - Check if a session is running
- * - getActiveCodexSessions() - List all active sessions
+ * This module streams Codex events by spawning the local `codex` CLI with
+ * `exec --experimental-json`, so it stays aligned with the user's working CLI
+ * authentication and configuration.
  */
 
-import { Codex } from '@openai/codex-sdk';
+import { spawn } from 'child_process';
+import { promises as fs } from 'fs';
+import os from 'os';
+import path from 'path';
+import readline from 'readline';
+import TOML from '@iarna/toml';
 
 // Track active sessions
 const activeCodexSessions = new Map();
+const CODEX_CONFIG_CACHE_TTL_MS = 5000;
+let cachedCodexConfig = null;
+let cachedCodexConfigReadAt = 0;
+
+function buildCodexProcessEnv() {
+  const env = {};
+
+  for (const [key, value] of Object.entries(process.env)) {
+    if (typeof value === 'string') {
+      env[key] = value;
+    }
+  }
+
+  // Ensure native CLI identity unless the user explicitly sets another value.
+  if (env.CODEX_INTERNAL_ORIGINATOR_OVERRIDE === 'codex_sdk_ts') {
+    delete env.CODEX_INTERNAL_ORIGINATOR_OVERRIDE;
+  }
+
+  return env;
+}
+
+function normalizeComparablePath(inputPath) {
+  if (!inputPath || typeof inputPath !== 'string') {
+    return '';
+  }
+
+  const withoutLongPathPrefix = inputPath.startsWith('\\\\?\\')
+    ? inputPath.slice(4)
+    : inputPath;
+  const normalized = path.normalize(withoutLongPathPrefix.trim());
+
+  if (!normalized) {
+    return '';
+  }
+
+  const resolved = path.resolve(normalized);
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+async function readCodexConfig() {
+  const now = Date.now();
+  if ((now - cachedCodexConfigReadAt) < CODEX_CONFIG_CACHE_TTL_MS) {
+    return cachedCodexConfig;
+  }
+
+  const configPath = path.join(os.homedir(), '.codex', 'config.toml');
+  try {
+    const content = await fs.readFile(configPath, 'utf8');
+    cachedCodexConfig = TOML.parse(content);
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      console.warn('[Codex] Failed to parse ~/.codex/config.toml:', error.message);
+    }
+    cachedCodexConfig = null;
+  }
+
+  cachedCodexConfigReadAt = now;
+  return cachedCodexConfig;
+}
+
+function getTrustLevelFromConfig(config, workingDirectory) {
+  const projectsConfig = config?.projects;
+  if (!projectsConfig || typeof projectsConfig !== 'object') {
+    return null;
+  }
+
+  const normalizedWorkingDirectory = normalizeComparablePath(workingDirectory);
+  if (!normalizedWorkingDirectory) {
+    return null;
+  }
+
+  let matchedTrustLevel = null;
+  let matchedPathLength = -1;
+
+  for (const [projectPath, projectConfig] of Object.entries(projectsConfig)) {
+    const normalizedProjectPath = normalizeComparablePath(projectPath);
+    if (!normalizedProjectPath) {
+      continue;
+    }
+
+    const isExactMatch = normalizedWorkingDirectory === normalizedProjectPath;
+    const isChildMatch = normalizedWorkingDirectory.startsWith(`${normalizedProjectPath}${path.sep}`);
+    if (!isExactMatch && !isChildMatch) {
+      continue;
+    }
+
+    if (normalizedProjectPath.length > matchedPathLength) {
+      matchedPathLength = normalizedProjectPath.length;
+      matchedTrustLevel = typeof projectConfig?.trust_level === 'string'
+        ? projectConfig.trust_level
+        : null;
+    }
+  }
+
+  return matchedTrustLevel;
+}
+
+async function resolveEffectivePermissionMode(permissionMode, workingDirectory) {
+  if (permissionMode !== 'default') {
+    return permissionMode;
+  }
+
+  const config = await readCodexConfig();
+  if (!config) {
+    return permissionMode;
+  }
+
+  const trustLevel = getTrustLevelFromConfig(config, workingDirectory);
+  if (trustLevel === 'trusted') {
+    return 'acceptEdits';
+  }
+
+  if (config.approval_mode === 'never') {
+    return 'acceptEdits';
+  }
+
+  return permissionMode;
+}
 
 /**
  * Transform Codex SDK event to WebSocket message format
@@ -139,7 +256,7 @@ function transformCodexEvent(event) {
     case 'thread.started':
       return {
         type: 'thread_started',
-        threadId: event.id
+        threadId: event.thread_id || event.id || null
       };
 
     case 'error':
@@ -157,7 +274,7 @@ function transformCodexEvent(event) {
 }
 
 /**
- * Map permission mode to Codex SDK options
+ * Map permission mode to Codex CLI options
  * @param {string} permissionMode - 'default', 'acceptEdits', or 'bypassPermissions'
  * @returns {object} - { sandboxMode, approvalPolicy }
  */
@@ -198,61 +315,106 @@ export async function queryCodex(command, options = {}, ws) {
   } = options;
 
   const workingDirectory = cwd || projectPath || process.cwd();
-  const { sandboxMode, approvalPolicy } = mapPermissionModeToCodexOptions(permissionMode);
+  const effectivePermissionMode = await resolveEffectivePermissionMode(permissionMode, workingDirectory);
+  const { sandboxMode, approvalPolicy } = mapPermissionModeToCodexOptions(effectivePermissionMode);
 
-  let codex;
-  let thread;
-  let currentSessionId = sessionId;
-  const abortController = new AbortController();
+  const args = ['exec', '--experimental-json'];
+  if (model) {
+    args.push('--model', model);
+  }
+  if (sandboxMode) {
+    args.push('--sandbox', sandboxMode);
+  }
+  if (workingDirectory) {
+    args.push('--cd', workingDirectory);
+  }
+  args.push('--skip-git-repo-check');
+  if (approvalPolicy) {
+    args.push('--config', `approval_policy="${approvalPolicy}"`);
+  }
+  if (sessionId) {
+    args.push('resume', sessionId);
+  }
+
+  let currentSessionId = sessionId || `codex-pending-${Date.now()}`;
+  let sessionCreatedSent = false;
+  const startedAt = new Date().toISOString();
+  const prompt = typeof command === 'string' ? command : '';
+  let codexProcess = null;
 
   try {
-    // Initialize Codex SDK
-    codex = new Codex();
+    codexProcess = spawn('codex', args, {
+      env: buildCodexProcessEnv(),
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
 
-    // Thread options with sandbox and approval settings
-    const threadOptions = {
-      workingDirectory,
-      skipGitRepoCheck: true,
-      sandboxMode,
-      approvalPolicy,
-      model
+    activeCodexSessions.set(currentSessionId, {
+      process: codexProcess,
+      status: 'running',
+      startedAt,
+    });
+
+    const emitSessionCreated = (id) => {
+      if (sessionCreatedSent || !id) {
+        return;
+      }
+      sessionCreatedSent = true;
+      sendMessage(ws, {
+        type: 'session-created',
+        sessionId: id,
+        provider: 'codex',
+      });
     };
 
-    // Start or resume thread
     if (sessionId) {
-      thread = codex.resumeThread(sessionId, threadOptions);
-    } else {
-      thread = codex.startThread(threadOptions);
+      emitSessionCreated(sessionId);
     }
 
-    // Get the thread ID
-    currentSessionId = thread.id || sessionId || `codex-${Date.now()}`;
-
-    // Track the session
-    activeCodexSessions.set(currentSessionId, {
-      thread,
-      codex,
-      status: 'running',
-      abortController,
-      startedAt: new Date().toISOString()
+    const closePromise = new Promise((resolve) => {
+      codexProcess.once('close', (code) => resolve(code ?? -1));
     });
 
-    // Send session created event
-    sendMessage(ws, {
-      type: 'session-created',
-      sessionId: currentSessionId,
-      provider: 'codex'
+    codexProcess.stdin?.write(prompt);
+    codexProcess.stdin?.end();
+
+    const stderrChunks = [];
+    codexProcess.stderr?.on('data', (chunk) => {
+      stderrChunks.push(chunk.toString());
     });
 
-    // Execute with streaming
-    const streamedTurn = await thread.runStreamed(command, {
-      signal: abortController.signal
+    const rl = readline.createInterface({
+      input: codexProcess.stdout,
+      crlfDelay: Infinity,
     });
 
-    for await (const event of streamedTurn.events) {
-      // Check if session was aborted
-      const session = activeCodexSessions.get(currentSessionId);
-      if (!session || session.status === 'aborted') {
+    for await (const line of rl) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('{')) {
+        continue;
+      }
+
+      let event;
+      try {
+        event = JSON.parse(trimmed);
+      } catch {
+        continue;
+      }
+
+      const threadId = typeof event.thread_id === 'string' ? event.thread_id : null;
+      if (event.type === 'thread.started' && threadId) {
+        if (threadId !== currentSessionId) {
+          const trackedSession = activeCodexSessions.get(currentSessionId);
+          if (trackedSession) {
+            activeCodexSessions.delete(currentSessionId);
+            activeCodexSessions.set(threadId, trackedSession);
+          }
+          currentSessionId = threadId;
+        }
+        emitSessionCreated(threadId);
+      }
+
+      const trackedSession = activeCodexSessions.get(currentSessionId);
+      if (!trackedSession || trackedSession.status === 'aborted') {
         break;
       }
 
@@ -261,39 +423,49 @@ export async function queryCodex(command, options = {}, ws) {
       }
 
       const transformed = transformCodexEvent(event);
-
       sendMessage(ws, {
         type: 'codex-response',
         data: transformed,
-        sessionId: currentSessionId
+        sessionId: currentSessionId,
       });
 
-      // Extract and send token usage if available (normalized to match Claude format)
       if (event.type === 'turn.completed' && event.usage) {
         const totalTokens = (event.usage.input_tokens || 0) + (event.usage.output_tokens || 0);
         sendMessage(ws, {
           type: 'token-budget',
           data: {
             used: totalTokens,
-            total: 200000 // Default context window for Codex models
+            total: 200000,
           },
-          sessionId: currentSessionId
+          sessionId: currentSessionId,
         });
       }
     }
 
-    // Send completion event
-    sendMessage(ws, {
-      type: 'codex-complete',
-      sessionId: currentSessionId,
-      actualSessionId: thread.id
-    });
+    const exitCode = await closePromise;
+    const trackedSession = activeCodexSessions.get(currentSessionId);
+    const wasAborted = trackedSession?.status === 'aborted';
+
+    if (!wasAborted && exitCode !== 0) {
+      const stderrText = stderrChunks.join('').trim();
+      throw new Error(stderrText || `Codex Exec exited with code ${exitCode}`);
+    }
+
+    if (!wasAborted) {
+      if (!sessionCreatedSent && currentSessionId) {
+        emitSessionCreated(currentSessionId);
+      }
+      sendMessage(ws, {
+        type: 'codex-complete',
+        sessionId: currentSessionId,
+        actualSessionId: currentSessionId,
+      });
+    }
 
   } catch (error) {
     const session = currentSessionId ? activeCodexSessions.get(currentSessionId) : null;
     const wasAborted =
       session?.status === 'aborted' ||
-      error?.name === 'AbortError' ||
       String(error?.message || '').toLowerCase().includes('aborted');
 
     if (!wasAborted) {
@@ -301,7 +473,7 @@ export async function queryCodex(command, options = {}, ws) {
       sendMessage(ws, {
         type: 'codex-error',
         error: error.message,
-        sessionId: currentSessionId
+        sessionId: currentSessionId,
       });
     }
 
@@ -330,7 +502,7 @@ export function abortCodexSession(sessionId) {
 
   session.status = 'aborted';
   try {
-    session.abortController?.abort();
+    session.process?.kill('SIGTERM');
   } catch (error) {
     console.warn(`[Codex] Failed to abort session ${sessionId}:`, error);
   }

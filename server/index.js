@@ -37,7 +37,7 @@ import os from 'os';
 import http from 'http';
 import cors from 'cors';
 import { promises as fsPromises } from 'fs';
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import pty from 'node-pty';
 import fetch from 'node-fetch';
 import mime from 'mime-types';
@@ -83,6 +83,12 @@ let projectsWatchers = [];
 let projectsWatcherDebounceTimer = null;
 const connectedClients = new Set();
 let isGetProjectsRunning = false; // Flag to prevent reentrant calls
+
+function isCommandAvailable(command) {
+    const checker = os.platform() === 'win32' ? 'where' : 'which';
+    const result = spawnSync(checker, [command], { stdio: 'ignore' });
+    return result.status === 0;
+}
 
 // Broadcast progress to all connected WebSocket clients
 function broadcastProgress(progress) {
@@ -1069,7 +1075,7 @@ function handleShellConnection(ws) {
                 const hasSession = data.hasSession;
                 const provider = data.provider || 'claude';
                 const initialCommand = data.initialCommand;
-                const isPlainShell = data.isPlainShell || (!!initialCommand && !hasSession) || provider === 'plain-shell';
+                let isPlainShell = data.isPlainShell || (!!initialCommand && !hasSession) || provider === 'plain-shell';
                 urlDetectionBuffer = '';
                 announcedAuthUrls.clear();
 
@@ -1131,12 +1137,38 @@ function handleShellConnection(ws) {
                     console.log('⚡ Initial command:', initialCommand);
                 }
 
+                if (!isPlainShell) {
+                    const requiredCommand = provider === 'cursor'
+                        ? 'cursor-agent'
+                        : provider === 'codex'
+                            ? 'codex'
+                            : 'claude';
+
+                    if (!isCommandAvailable(requiredCommand)) {
+                        const providerName = provider === 'cursor'
+                            ? 'Cursor'
+                            : provider === 'codex'
+                                ? 'Codex'
+                                : 'Claude';
+
+                        ws.send(JSON.stringify({
+                            type: 'output',
+                            data: `\x1b[33m${providerName} CLI not found (${requiredCommand}). Falling back to plain shell.\x1b[0m\r\n`
+                        }));
+                        isPlainShell = true;
+                    }
+                }
+
                 // First send a welcome message
                 let welcomeMsg;
                 if (isPlainShell) {
                     welcomeMsg = `\x1b[36mStarting terminal in: ${projectPath}\x1b[0m\r\n`;
                 } else {
-                    const providerName = provider === 'cursor' ? 'Cursor' : 'Claude';
+                    const providerName = provider === 'cursor'
+                        ? 'Cursor'
+                        : provider === 'codex'
+                            ? 'Codex'
+                            : 'Claude';
                     welcomeMsg = hasSession ?
                         `\x1b[36mResuming ${providerName} session ${sessionId} in: ${projectPath}\x1b[0m\r\n` :
                         `\x1b[36mStarting new ${providerName} session in: ${projectPath}\x1b[0m\r\n`;
@@ -1153,9 +1185,18 @@ function handleShellConnection(ws) {
                     if (isPlainShell) {
                         // Plain shell mode - just run the initial command in the project directory
                         if (os.platform() === 'win32') {
-                            shellCommand = `Set-Location -Path "${projectPath}"; ${initialCommand}`;
+                            if (initialCommand) {
+                                shellCommand = `Set-Location -Path "${projectPath}"; ${initialCommand}`;
+                            } else {
+                                shellCommand = `Set-Location -Path "${projectPath}"; powershell`;
+                            }
                         } else {
-                            shellCommand = `cd "${projectPath}" && ${initialCommand}`;
+                            if (initialCommand) {
+                                shellCommand = `cd "${projectPath}" && ${initialCommand}`;
+                            } else {
+                                const interactiveShell = process.env.SHELL || 'bash';
+                                shellCommand = `cd "${projectPath}" && exec "${interactiveShell}"`;
+                            }
                         }
                     } else if (provider === 'cursor') {
                         // Use cursor-agent command
@@ -1170,6 +1211,21 @@ function handleShellConnection(ws) {
                                 shellCommand = `cd "${projectPath}" && cursor-agent --resume="${sessionId}"`;
                             } else {
                                 shellCommand = `cd "${projectPath}" && cursor-agent`;
+                            }
+                        }
+                    } else if (provider === 'codex') {
+                        // Use codex command
+                        if (os.platform() === 'win32') {
+                            if (hasSession && sessionId) {
+                                shellCommand = `Set-Location -Path "${projectPath}"; codex resume ${sessionId}; if ($LASTEXITCODE -ne 0) { codex }`;
+                            } else {
+                                shellCommand = `Set-Location -Path "${projectPath}"; codex`;
+                            }
+                        } else {
+                            if (hasSession && sessionId) {
+                                shellCommand = `cd "${projectPath}" && codex resume ${sessionId} || codex`;
+                            } else {
+                                shellCommand = `cd "${projectPath}" && codex`;
                             }
                         }
                     } else {

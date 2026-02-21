@@ -30,6 +30,7 @@ interface MessageComponentProps {
   autoExpandTools?: boolean;
   showRawParameters?: boolean;
   showThinking?: boolean;
+  showInjectedContext?: boolean;
   selectedProject?: Project | null;
   provider: Provider | string;
 }
@@ -42,7 +43,23 @@ type InteractiveOption = {
 
 type PermissionGrantState = 'idle' | 'granted' | 'error';
 
-const MessageComponent = memo(({ message, index, prevMessage, createDiff, onFileOpen, onShowSettings, onGrantToolPermission, autoExpandTools, showRawParameters, showThinking, selectedProject, provider }: MessageComponentProps) => {
+function stripInjectedContext(content: string): string {
+  const agentsBlockPattern = /^\s*#\s*AGENTS\.md instructions for[^\n]*\n(?:.*\n)*?<INSTRUCTIONS>[\s\S]*?<\/INSTRUCTIONS>\s*/i;
+  const environmentBlockPattern = /^\s*<environment_context>[\s\S]*?<\/environment_context>\s*/i;
+
+  let current = content;
+  let previous = '';
+
+  while (current !== previous) {
+    previous = current;
+    current = current.replace(agentsBlockPattern, '');
+    current = current.replace(environmentBlockPattern, '');
+  }
+
+  return current.replace(/^\s+/, '');
+}
+
+const MessageComponent = memo(({ message, index, prevMessage, createDiff, onFileOpen, onShowSettings, onGrantToolPermission, autoExpandTools, showRawParameters, showThinking, showInjectedContext, selectedProject, provider }: MessageComponentProps) => {
   const { t } = useTranslation('chat');
   const isGrouped = prevMessage && prevMessage.type === message.type &&
                    ((prevMessage.type === 'assistant') ||
@@ -87,8 +104,21 @@ const MessageComponent = memo(({ message, index, prevMessage, createDiff, onFile
 
   const formattedTime = useMemo(() => new Date(message.timestamp).toLocaleTimeString(), [message.timestamp]);
   const shouldHideThinkingMessage = Boolean(message.isThinking && !showThinking);
+  const userMessageContent = useMemo(() => {
+    const raw = String(message.content || '');
+    if (showInjectedContext || message.type !== 'user') {
+      return raw;
+    }
+    return stripInjectedContext(raw);
+  }, [message.content, message.type, showInjectedContext]);
+  const shouldHideInjectedOnlyUserMessage = Boolean(
+    message.type === 'user' &&
+      !showInjectedContext &&
+      !userMessageContent.trim() &&
+      (!message.images || message.images.length === 0),
+  );
 
-  if (shouldHideThinkingMessage) {
+  if (shouldHideThinkingMessage || shouldHideInjectedOnlyUserMessage) {
     return null;
   }
 
@@ -102,7 +132,7 @@ const MessageComponent = memo(({ message, index, prevMessage, createDiff, onFile
         <div className="flex items-end space-x-0 sm:space-x-3 w-full sm:w-auto sm:max-w-[85%] md:max-w-md lg:max-w-lg xl:max-w-xl">
           <div className="bg-blue-600 text-white rounded-2xl rounded-br-md px-3 sm:px-4 py-2 shadow-sm flex-1 sm:flex-initial">
             <div className="text-sm whitespace-pre-wrap break-words">
-              {message.content}
+              {userMessageContent}
             </div>
             {message.images && message.images.length > 0 && (
               <div className="mt-2 grid grid-cols-2 gap-2">
@@ -443,4 +473,3 @@ const MessageComponent = memo(({ message, index, prevMessage, createDiff, onFile
 });
 
 export default MessageComponent;
-
