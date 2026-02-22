@@ -913,6 +913,35 @@ export function useChatComposerState({
     [onInputFocusChange],
   );
 
+  useEffect(() => {
+    if (!isInputFocused || typeof window === 'undefined') {
+      return;
+    }
+
+    const viewport = window.visualViewport;
+    if (!viewport) {
+      return;
+    }
+
+    const baselineViewportHeight = viewport.height;
+    const KEYBOARD_CLOSE_THRESHOLD_PX = 60;
+
+    const handleViewportChange = () => {
+      if (viewport.height >= baselineViewportHeight + KEYBOARD_CLOSE_THRESHOLD_PX) {
+        setIsInputFocused(false);
+        onInputFocusChange?.(false);
+      }
+    };
+
+    viewport.addEventListener('resize', handleViewportChange);
+    viewport.addEventListener('scroll', handleViewportChange);
+
+    return () => {
+      viewport.removeEventListener('resize', handleViewportChange);
+      viewport.removeEventListener('scroll', handleViewportChange);
+    };
+  }, [isInputFocused, onInputFocusChange]);
+
   return {
     input,
     setInput,

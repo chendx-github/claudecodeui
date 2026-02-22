@@ -123,12 +123,22 @@ async function resolveEffectivePermissionMode(permissionMode, workingDirectory) 
     return permissionMode;
   }
 
-  const trustLevel = getTrustLevelFromConfig(config, workingDirectory);
-  if (trustLevel === 'trusted') {
-    return 'acceptEdits';
+  const approvalMode = typeof config.approval_mode === 'string'
+    ? config.approval_mode.trim().toLowerCase()
+    : '';
+  const sandboxMode = typeof config.sandbox_mode === 'string'
+    ? config.sandbox_mode.trim().toLowerCase()
+    : '';
+  const isDangerFullAccessSandbox =
+    sandboxMode === 'danger-full-access' || sandboxMode === 'danger_full_access';
+
+  if (approvalMode === 'never') {
+    // Respect explicit yolo settings from ~/.codex/config.toml.
+    return isDangerFullAccessSandbox ? 'bypassPermissions' : 'acceptEdits';
   }
 
-  if (config.approval_mode === 'never') {
+  const trustLevel = getTrustLevelFromConfig(config, workingDirectory);
+  if (trustLevel === 'trusted') {
     return 'acceptEdits';
   }
 

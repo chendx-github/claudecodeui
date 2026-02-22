@@ -324,6 +324,12 @@ export function useProjectsState({
     }
   }, [sessionId, projects, selectedProject?.name, selectedSession?.id, selectedSession?.__provider]);
 
+  useEffect(() => {
+    if (activeTab !== 'chat' && isInputFocused) {
+      setIsInputFocused(false);
+    }
+  }, [activeTab, isInputFocused]);
+
   const handleProjectSelect = useCallback(
     (project: Project) => {
       setSelectedProject(project);

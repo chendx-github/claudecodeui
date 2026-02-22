@@ -108,6 +108,8 @@ temp/
 .serena/
 CLAUDE.md
 .mcp.json
+certs/dev-selfsigned.key
+certs/dev-selfsigned.crt
 
 
 # Database files

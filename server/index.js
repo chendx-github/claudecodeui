@@ -35,6 +35,7 @@ import express from 'express';
 import { WebSocketServer, WebSocket } from 'ws';
 import os from 'os';
 import http from 'http';
+import https from 'https';
 import cors from 'cors';
 import { promises as fsPromises } from 'fs';
 import { spawn, spawnSync } from 'child_process';
@@ -212,7 +213,37 @@ async function setupProjectsWatcher() {
 
 
 const app = express();
-const server = http.createServer(app);
+const HTTPS_ENABLED = String(process.env.HTTPS || 'false').toLowerCase() === 'true';
+const DEFAULT_SSL_KEY_PATH = path.join(__dirname, '..', 'certs', 'dev-selfsigned.key');
+const DEFAULT_SSL_CERT_PATH = path.join(__dirname, '..', 'certs', 'dev-selfsigned.crt');
+const SERVER_PROTOCOL = HTTPS_ENABLED ? 'https' : 'http';
+
+function resolveServerPath(configuredPath, fallbackPath) {
+    if (!configuredPath) {
+        return fallbackPath;
+    }
+    return path.isAbsolute(configuredPath)
+        ? configuredPath
+        : path.resolve(path.join(__dirname, '..'), configuredPath);
+}
+
+const SSL_KEY_PATH = resolveServerPath(process.env.SSL_KEY_PATH, DEFAULT_SSL_KEY_PATH);
+const SSL_CERT_PATH = resolveServerPath(process.env.SSL_CERT_PATH, DEFAULT_SSL_CERT_PATH);
+
+const server = HTTPS_ENABLED
+    ? (() => {
+        try {
+            const key = fs.readFileSync(SSL_KEY_PATH);
+            const cert = fs.readFileSync(SSL_CERT_PATH);
+            return https.createServer({ key, cert }, app);
+        } catch (error) {
+            console.error('[ERROR] Failed to initialize HTTPS server. Check SSL_KEY_PATH and SSL_CERT_PATH.');
+            console.error('[ERROR] SSL_KEY_PATH:', SSL_KEY_PATH);
+            console.error('[ERROR] SSL_CERT_PATH:', SSL_CERT_PATH);
+            throw error;
+        }
+    })()
+    : http.createServer(app);
 
 const ptySessionsMap = new Map();
 const PTY_SESSION_TIMEOUT = 30 * 60 * 1000;
@@ -1972,7 +2003,10 @@ async function startServer() {
             console.log(`  ${c.bright('Claude Code UI Server - Ready')}`);
             console.log(c.dim('═'.repeat(63)));
             console.log('');
-            console.log(`${c.info('[INFO]')} Server URL:  ${c.bright('http://' + DISPLAY_HOST + ':' + PORT)}`);
+            if (HTTPS_ENABLED) {
+                console.log(`${c.info('[INFO]')} HTTPS enabled with certificate: ${c.dim(SSL_CERT_PATH)}`);
+            }
+            console.log(`${c.info('[INFO]')} Server URL:  ${c.bright(SERVER_PROTOCOL + '://' + DISPLAY_HOST + ':' + PORT)}`);
             console.log(`${c.info('[INFO]')} Installed at: ${c.dim(appInstallPath)}`);
             console.log(`${c.tip('[TIP]')}  Run "cloudcli status" for full configuration details`);
             console.log('');

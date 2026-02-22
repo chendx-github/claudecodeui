@@ -135,7 +135,7 @@ export default function AppContent() {
         <MobileNav
           activeTab={activeTab}
           setActiveTab={setActiveTab}
-          isInputFocused={isInputFocused}
+          isInputFocused={activeTab === 'chat' && isInputFocused}
         />
       )}
 

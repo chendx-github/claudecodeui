@@ -22,12 +22,30 @@ function buildCodexModelOption(model: string): ModelOption {
   };
 }
 
+const VALID_PERMISSION_MODES: PermissionMode[] = [
+  'default',
+  'acceptEdits',
+  'bypassPermissions',
+  'plan',
+];
+
+function getStoredProvider(): SessionProvider {
+  if (typeof window === 'undefined') {
+    return 'claude';
+  }
+  return (localStorage.getItem('selected-provider') as SessionProvider) || 'claude';
+}
+
+function getDefaultPermissionMode(provider: SessionProvider): PermissionMode {
+  return provider === 'codex' ? 'bypassPermissions' : 'default';
+}
+
 export function useChatProviderState({ selectedSession }: UseChatProviderStateArgs) {
-  const [permissionMode, setPermissionMode] = useState<PermissionMode>('default');
+  const [provider, setProvider] = useState<SessionProvider>(() => getStoredProvider());
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>(() =>
+    getDefaultPermissionMode(getStoredProvider()),
+  );
   const [pendingPermissionRequests, setPendingPermissionRequests] = useState<PendingPermissionRequest[]>([]);
-  const [provider, setProvider] = useState<SessionProvider>(() => {
-    return (localStorage.getItem('selected-provider') as SessionProvider) || 'claude';
-  });
   const [cursorModel, setCursorModel] = useState<string>(() => {
     return localStorage.getItem('cursor-model') || CURSOR_MODELS.DEFAULT;
   });
@@ -77,13 +95,19 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
   const codexModel = codexModelValue;
 
   useEffect(() => {
+    const defaultMode = getDefaultPermissionMode(provider);
+
     if (!selectedSession?.id) {
+      setPermissionMode(defaultMode);
       return;
     }
 
-    const savedMode = localStorage.getItem(`permissionMode-${selectedSession.id}`);
-    setPermissionMode((savedMode as PermissionMode) || 'default');
-  }, [selectedSession?.id]);
+    const savedMode = localStorage.getItem(`permissionMode-${selectedSession.id}`) as PermissionMode | null;
+    const nextMode = savedMode && VALID_PERMISSION_MODES.includes(savedMode)
+      ? savedMode
+      : defaultMode;
+    setPermissionMode(nextMode);
+  }, [provider, selectedSession?.id]);
 
   useEffect(() => {
     if (!selectedSession?.__provider || selectedSession.__provider === provider) {
