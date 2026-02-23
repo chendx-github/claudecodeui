@@ -264,16 +264,16 @@ function FileTree({ selectedProject, onFileOpen }) {
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [expandedDirs, setExpandedDirs] = useState(new Set());
+  const [loadedDirs, setLoadedDirs] = useState(new Set());
+  const [loadingDirs, setLoadingDirs] = useState(new Set());
   const [selectedImage, setSelectedImage] = useState(null);
   const [viewMode, setViewMode] = useState('detailed');
   const [searchQuery, setSearchQuery] = useState('');
-  const [filteredFiles, setFilteredFiles] = useState([]);
+  const [searchResults, setSearchResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [searchTruncated, setSearchTruncated] = useState(false);
 
-  useEffect(() => {
-    if (selectedProject) {
-      fetchFiles();
-    }
-  }, [selectedProject]);
+  const hasSearchQuery = searchQuery.trim().length > 0;
 
   useEffect(() => {
     const savedViewMode = localStorage.getItem('file-tree-view-mode');
@@ -283,74 +283,172 @@ function FileTree({ selectedProject, onFileOpen }) {
   }, []);
 
   useEffect(() => {
-    if (!searchQuery.trim()) {
-      setFilteredFiles(files);
-    } else {
-      const filtered = filterFiles(files, searchQuery.toLowerCase());
-      setFilteredFiles(filtered);
-
-      const expandMatches = (items) => {
-        items.forEach(item => {
-          if (item.type === 'directory' && item.children && item.children.length > 0) {
-            setExpandedDirs(prev => new Set(prev.add(item.path)));
-            expandMatches(item.children);
-          }
-        });
-      };
-      expandMatches(filtered);
+    if (!selectedProject?.name) {
+      setFiles([]);
+      setExpandedDirs(new Set());
+      setLoadedDirs(new Set());
+      setLoadingDirs(new Set());
+      return;
     }
-  }, [files, searchQuery]);
 
-  const filterFiles = (items, query) => {
-    return items.reduce((filtered, item) => {
-      const matchesName = item.name.toLowerCase().includes(query);
-      let filteredChildren = [];
+    const fetchRootFiles = async () => {
+      setLoading(true);
+      try {
+        const response = await api.listFiles(selectedProject.name);
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('❌ Root file fetch failed:', response.status, errorText);
+          setFiles([]);
+          return;
+        }
 
-      if (item.type === 'directory' && item.children) {
-        filteredChildren = filterFiles(item.children, query);
+        const data = await response.json();
+        setFiles(Array.isArray(data.items) ? data.items : []);
+        setExpandedDirs(new Set());
+        setLoadedDirs(new Set());
+        setLoadingDirs(new Set());
+      } catch (error) {
+        console.error('❌ Error fetching root files:', error);
+        setFiles([]);
+      } finally {
+        setLoading(false);
       }
+    };
 
-      if (matchesName || filteredChildren.length > 0) {
-        filtered.push({
-          ...item,
-          children: filteredChildren
+    fetchRootFiles();
+  }, [selectedProject?.name]);
+
+  useEffect(() => {
+    const query = searchQuery.trim();
+    if (!selectedProject?.name || !query) {
+      setSearching(false);
+      setSearchResults([]);
+      setSearchTruncated(false);
+      return;
+    }
+
+    let active = true;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(async () => {
+      try {
+        setSearching(true);
+        const response = await api.searchFiles(selectedProject.name, query, {
+          limit: 120,
+          type: 'file',
+          signal: controller.signal,
         });
-      }
 
-      return filtered;
-    }, []);
+        if (!response.ok) {
+          if (active) {
+            setSearchResults([]);
+            setSearchTruncated(false);
+          }
+          return;
+        }
+
+        const data = await response.json();
+        if (!active) {
+          return;
+        }
+        setSearchResults(Array.isArray(data.results) ? data.results : []);
+        setSearchTruncated(Boolean(data.truncated));
+      } catch (error) {
+        if (error.name !== 'AbortError') {
+          console.error('❌ Error searching files:', error);
+          if (active) {
+            setSearchResults([]);
+            setSearchTruncated(false);
+          }
+        }
+      } finally {
+        if (active) {
+          setSearching(false);
+        }
+      }
+    }, 180);
+
+    return () => {
+      active = false;
+      clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [selectedProject?.name, searchQuery]);
+
+  const updateDirectoryChildren = (items, targetPath, newChildren) => {
+    return items.map((item) => {
+      if (item.path === targetPath && item.type === 'directory') {
+        return {
+          ...item,
+          children: newChildren,
+        };
+      }
+      if (item.type === 'directory' && Array.isArray(item.children) && item.children.length > 0) {
+        return {
+          ...item,
+          children: updateDirectoryChildren(item.children, targetPath, newChildren),
+        };
+      }
+      return item;
+    });
   };
 
-  const fetchFiles = async () => {
-    setLoading(true);
+  const loadDirectoryChildren = async (dirPath) => {
+    if (!selectedProject?.name || !dirPath) {
+      return;
+    }
+    if (loadedDirs.has(dirPath) || loadingDirs.has(dirPath)) {
+      return;
+    }
+
+    setLoadingDirs((previous) => {
+      const next = new Set(previous);
+      next.add(dirPath);
+      return next;
+    });
+
     try {
-      const response = await api.getFiles(selectedProject.name);
+      const response = await api.listFiles(selectedProject.name, dirPath);
 
       if (!response.ok) {
         const errorText = await response.text();
-        console.error('❌ File fetch failed:', response.status, errorText);
-        setFiles([]);
+        console.error('❌ Child directory fetch failed:', response.status, errorText);
         return;
       }
 
       const data = await response.json();
-      setFiles(data);
+      const children = Array.isArray(data.items) ? data.items : [];
+      setFiles((previous) => updateDirectoryChildren(previous, dirPath, children));
+      setLoadedDirs((previous) => {
+        const next = new Set(previous);
+        next.add(dirPath);
+        return next;
+      });
     } catch (error) {
-      console.error('❌ Error fetching files:', error);
-      setFiles([]);
+      console.error('❌ Error fetching child directory:', error);
     } finally {
-      setLoading(false);
+      setLoadingDirs((previous) => {
+        const next = new Set(previous);
+        next.delete(dirPath);
+        return next;
+      });
     }
   };
 
-  const toggleDirectory = (path) => {
-    const newExpanded = new Set(expandedDirs);
-    if (newExpanded.has(path)) {
-      newExpanded.delete(path);
-    } else {
-      newExpanded.add(path);
+  const toggleDirectory = async (path) => {
+    const isExpanded = expandedDirs.has(path);
+    setExpandedDirs((previous) => {
+      const next = new Set(previous);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return next;
+    });
+
+    if (!isExpanded) {
+      await loadDirectoryChildren(path);
     }
-    setExpandedDirs(newExpanded);
   };
 
   const changeViewMode = (mode) => {
@@ -393,7 +491,7 @@ function FileTree({ selectedProject, onFileOpen }) {
   // ── Click handler shared across all view modes ──
   const handleItemClick = (item) => {
     if (item.type === 'directory') {
-      toggleDirectory(item.path);
+      void toggleDirectory(item.path);
     } else if (isImageFile(item.name)) {
       setSelectedImage({
         name: item.name,
@@ -406,18 +504,38 @@ function FileTree({ selectedProject, onFileOpen }) {
     }
   };
 
-  // ── Indent guide + folder/file icon rendering ──
-  const renderIndentGuides = (level) => {
-    if (level === 0) return null;
+  const renderLoadedChildren = (item, level, renderFn) => {
+    if (item.type !== 'directory' || !expandedDirs.has(item.path)) {
+      return null;
+    }
+
+    const nextLevelPadding = `${(level + 1) * 16 + 4}px`;
+    const hasChildren = Array.isArray(item.children) && item.children.length > 0;
+    const isLoadingChildren = loadingDirs.has(item.path);
+    const hasLoadedChildren = loadedDirs.has(item.path);
+
     return (
-      <span className="flex items-center flex-shrink-0" aria-hidden="true">
-        {Array.from({ length: level }).map((_, i) => (
+      <div className="relative">
+        <span
+          className="absolute top-0 bottom-0 border-l border-border/40"
+          style={{ left: `${level * 16 + 14}px` }}
+          aria-hidden="true"
+        />
+        {isLoadingChildren && (
+          <div className="py-[3px] text-xs text-muted-foreground" style={{ paddingLeft: nextLevelPadding }}>
+            {t('fileTree.loading')}
+          </div>
+        )}
+        {!isLoadingChildren && hasChildren && renderFn(item.children, level + 1)}
+        {!isLoadingChildren && !hasChildren && hasLoadedChildren && (
           <span
-            key={i}
-            className="inline-block w-4 h-full border-l border-border/50"
-          />
-        ))}
-      </span>
+            className="block py-[3px] text-xs text-muted-foreground"
+            style={{ paddingLeft: nextLevelPadding }}
+          >
+            {t('fileTree.noFilesFound')}
+          </span>
+        )}
+      </div>
     );
   };
 
@@ -468,7 +586,7 @@ function FileTree({ selectedProject, onFileOpen }) {
             )}
             style={{ paddingLeft: `${level * 16 + 4}px` }}
             onClick={() => handleItemClick(item)}
-          >
+	          >
             {renderItemIcons(item)}
             <span className={cn(
               'text-[13px] leading-tight truncate',
@@ -478,16 +596,7 @@ function FileTree({ selectedProject, onFileOpen }) {
             </span>
           </div>
 
-          {isDir && isOpen && item.children && item.children.length > 0 && (
-            <div className="relative">
-              <span
-                className="absolute top-0 bottom-0 border-l border-border/40"
-                style={{ left: `${level * 16 + 14}px` }}
-                aria-hidden="true"
-              />
-              {renderFileTree(item.children, level + 1)}
-            </div>
-          )}
+          {renderLoadedChildren(item, level, renderFileTree)}
         </div>
       );
     });
@@ -531,16 +640,7 @@ function FileTree({ selectedProject, onFileOpen }) {
             </div>
           </div>
 
-          {isDir && isOpen && item.children && (
-            <div className="relative">
-              <span
-                className="absolute top-0 bottom-0 border-l border-border/40"
-                style={{ left: `${level * 16 + 14}px` }}
-                aria-hidden="true"
-              />
-              {renderDetailedView(item.children, level + 1)}
-            </div>
-          )}
+          {renderLoadedChildren(item, level, renderDetailedView)}
         </div>
       );
     });
@@ -583,23 +683,63 @@ function FileTree({ selectedProject, onFileOpen }) {
             </div>
           </div>
 
-          {isDir && isOpen && item.children && (
-            <div className="relative">
-              <span
-                className="absolute top-0 bottom-0 border-l border-border/40"
-                style={{ left: `${level * 16 + 14}px` }}
-                aria-hidden="true"
-              />
-              {renderCompactView(item.children, level + 1)}
-            </div>
-          )}
+          {renderLoadedChildren(item, level, renderCompactView)}
         </div>
       );
     });
   };
 
+  const renderSearchResults = () => {
+    if (searching) {
+      return (
+        <div className="text-center py-8">
+          <div className="text-sm text-muted-foreground">{t('fileTree.loading')}</div>
+        </div>
+      );
+    }
+
+    if (searchResults.length === 0) {
+      return (
+        <div className="text-center py-8">
+          <div className="w-12 h-12 bg-muted rounded-lg flex items-center justify-center mx-auto mb-3">
+            <Search className="w-6 h-6 text-muted-foreground" />
+          </div>
+          <h4 className="font-medium text-foreground mb-1">{t('fileTree.noMatchesFound')}</h4>
+          <p className="text-sm text-muted-foreground">
+            {t('fileTree.tryDifferentSearch')}
+          </p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="space-y-0.5">
+        {searchResults.map((item) => (
+          <div
+            key={item.path}
+            className="group flex items-start gap-2 px-2 py-1.5 rounded-sm hover:bg-accent/60 cursor-pointer"
+            onClick={() => handleItemClick(item)}
+          >
+            <span className="mt-0.5 flex-shrink-0 ml-[18px]">{getFileIcon(item.name)}</span>
+            <div className="min-w-0">
+              <div className="text-[13px] leading-tight truncate text-foreground/90">{item.name}</div>
+              <div className="text-[11px] leading-tight text-muted-foreground font-mono truncate">
+                {item.relativePath || item.path}
+              </div>
+            </div>
+          </div>
+        ))}
+        {searchTruncated && (
+          <div className="px-2 pt-2 text-xs text-muted-foreground">
+            Search results are truncated. Refine your query for more precise matches.
+          </div>
+        )}
+      </div>
+    );
+  };
+
   // ─── Loading state ─────────────────────────────────────────────────
-  if (loading) {
+  if (loading && !hasSearchQuery) {
     return (
       <div className="h-full flex items-center justify-center">
         <div className="text-muted-foreground text-sm">
@@ -674,7 +814,7 @@ function FileTree({ selectedProject, onFileOpen }) {
       </div>
 
       {/* Column Headers for Detailed View */}
-      {viewMode === 'detailed' && filteredFiles.length > 0 && (
+      {!hasSearchQuery && viewMode === 'detailed' && files.length > 0 && (
         <div className="px-3 pt-1.5 pb-1 border-b border-border">
           <div className="grid grid-cols-12 gap-2 px-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
             <div className="col-span-5">{t('fileTree.name')}</div>
@@ -686,7 +826,9 @@ function FileTree({ selectedProject, onFileOpen }) {
       )}
 
       <ScrollArea className="flex-1 px-2 py-1">
-        {files.length === 0 ? (
+        {hasSearchQuery ? (
+          renderSearchResults()
+        ) : files.length === 0 ? (
           <div className="text-center py-8">
             <div className="w-12 h-12 bg-muted rounded-lg flex items-center justify-center mx-auto mb-3">
               <Folder className="w-6 h-6 text-muted-foreground" />
@@ -696,21 +838,11 @@ function FileTree({ selectedProject, onFileOpen }) {
               {t('fileTree.checkProjectPath')}
             </p>
           </div>
-        ) : filteredFiles.length === 0 && searchQuery ? (
-          <div className="text-center py-8">
-            <div className="w-12 h-12 bg-muted rounded-lg flex items-center justify-center mx-auto mb-3">
-              <Search className="w-6 h-6 text-muted-foreground" />
-            </div>
-            <h4 className="font-medium text-foreground mb-1">{t('fileTree.noMatchesFound')}</h4>
-            <p className="text-sm text-muted-foreground">
-              {t('fileTree.tryDifferentSearch')}
-            </p>
-          </div>
         ) : (
           <div>
-            {viewMode === 'simple' && renderFileTree(filteredFiles)}
-            {viewMode === 'compact' && renderCompactView(filteredFiles)}
-            {viewMode === 'detailed' && renderDetailedView(filteredFiles)}
+            {viewMode === 'simple' && renderFileTree(files)}
+            {viewMode === 'compact' && renderCompactView(files)}
+            {viewMode === 'detailed' && renderDetailedView(files)}
           </div>
         )}
       </ScrollArea>

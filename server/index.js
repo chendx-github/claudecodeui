@@ -877,6 +877,84 @@ app.put('/api/projects/:projectName/file', authenticateToken, async (req, res) =
     }
 });
 
+app.get('/api/projects/:projectName/files/list', authenticateToken, async (req, res) => {
+    try {
+        const projectRoot = await resolveProjectRootPath(req.params.projectName);
+        const showHidden = parseBooleanQueryValue(req.query.showHidden, false);
+
+        let targetPath;
+        try {
+            targetPath = resolvePathUnderProjectRoot(projectRoot, req.query.path);
+        } catch (error) {
+            return res.status(403).json({ error: error.message });
+        }
+
+        let stats;
+        try {
+            stats = await fsPromises.stat(targetPath);
+        } catch (error) {
+            if (error.code === 'ENOENT') {
+                return res.status(404).json({ error: 'Directory not found' });
+            }
+            throw error;
+        }
+
+        if (!stats.isDirectory()) {
+            return res.status(400).json({ error: 'Path is not a directory' });
+        }
+
+        const items = await listDirectoryEntries(targetPath, showHidden);
+        res.json({
+            path: targetPath,
+            items
+        });
+    } catch (error) {
+        console.error('[ERROR] Directory list error:', error.message);
+        if (error.code === 'ENOENT') {
+            return res.status(404).json({ error: 'Project path not found' });
+        }
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.get('/api/projects/:projectName/files/search', authenticateToken, async (req, res) => {
+    try {
+        const query = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+        if (!query) {
+            return res.json({
+                query: '',
+                results: [],
+                truncated: false
+            });
+        }
+
+        const showHidden = parseBooleanQueryValue(req.query.showHidden, false);
+        const limit = clampLimit(req.query.limit, 120);
+        const searchType = req.query.type === 'all' || req.query.type === 'directory'
+            ? req.query.type
+            : 'file';
+
+        const projectRoot = await resolveProjectRootPath(req.params.projectName);
+        const { results, truncated } = await searchProjectEntries(projectRoot, query, {
+            showHidden,
+            limit,
+            searchType
+        });
+
+        res.json({
+            query,
+            results,
+            truncated
+        });
+    } catch (error) {
+        console.error('[ERROR] File search error:', error.message);
+        if (error.code === 'ENOENT') {
+            return res.status(404).json({ error: 'Project path not found' });
+        }
+        res.status(500).json({ error: error.message });
+    }
+});
+
 app.get('/api/projects/:projectName/files', authenticateToken, async (req, res) => {
     try {
 
@@ -1896,6 +1974,193 @@ function permToRwx(perm) {
     return r + w + x;
 }
 
+const IGNORED_DIRECTORY_NAMES = new Set([
+    'node_modules',
+    'dist',
+    'build',
+    '.git',
+    '.svn',
+    '.hg'
+]);
+
+function shouldIgnoreEntry(entryName, showHidden = true) {
+    if (IGNORED_DIRECTORY_NAMES.has(entryName)) {
+        return true;
+    }
+    if (!showHidden && entryName.startsWith('.')) {
+        return true;
+    }
+    return false;
+}
+
+function parseBooleanQueryValue(value, fallback = false) {
+    if (typeof value !== 'string') {
+        return fallback;
+    }
+    const normalized = value.trim().toLowerCase();
+    if (normalized === 'true' || normalized === '1' || normalized === 'yes') {
+        return true;
+    }
+    if (normalized === 'false' || normalized === '0' || normalized === 'no') {
+        return false;
+    }
+    return fallback;
+}
+
+function clampLimit(value, fallback = 120, min = 1, max = 500) {
+    const parsed = Number.parseInt(value, 10);
+    if (Number.isNaN(parsed)) {
+        return fallback;
+    }
+    return Math.min(Math.max(parsed, min), max);
+}
+
+async function enrichEntryWithStats(item) {
+    try {
+        const stats = await fsPromises.stat(item.path);
+        item.size = stats.size;
+        item.modified = stats.mtime.toISOString();
+        const mode = stats.mode;
+        const ownerPerm = (mode >> 6) & 7;
+        const groupPerm = (mode >> 3) & 7;
+        const otherPerm = mode & 7;
+        item.permissions = ((mode >> 6) & 7).toString() + ((mode >> 3) & 7).toString() + (mode & 7).toString();
+        item.permissionsRwx = permToRwx(ownerPerm) + permToRwx(groupPerm) + permToRwx(otherPerm);
+    } catch (_error) {
+        item.size = 0;
+        item.modified = null;
+        item.permissions = '000';
+        item.permissionsRwx = '---------';
+    }
+    return item;
+}
+
+async function resolveProjectRootPath(projectName) {
+    let actualPath;
+    try {
+        actualPath = await extractProjectDirectory(projectName);
+    } catch (error) {
+        console.error('Error extracting project directory:', error);
+        actualPath = projectName.replace(/-/g, '/');
+    }
+    await fsPromises.access(actualPath);
+    return actualPath;
+}
+
+function resolvePathUnderProjectRoot(projectRoot, requestedPath = null) {
+    const normalizedRoot = path.resolve(projectRoot);
+    const resolved = !requestedPath
+        ? normalizedRoot
+        : path.isAbsolute(requestedPath)
+            ? path.resolve(requestedPath)
+            : path.resolve(normalizedRoot, requestedPath);
+
+    if (resolved !== normalizedRoot && !resolved.startsWith(normalizedRoot + path.sep)) {
+        throw new Error('Path must be under project root');
+    }
+    return resolved;
+}
+
+async function listDirectoryEntries(dirPath, showHidden = false) {
+    const entries = await fsPromises.readdir(dirPath, { withFileTypes: true });
+    const items = [];
+
+    for (const entry of entries) {
+        if (shouldIgnoreEntry(entry.name, showHidden)) {
+            continue;
+        }
+
+        const itemPath = path.join(dirPath, entry.name);
+        const item = {
+            name: entry.name,
+            path: itemPath,
+            type: entry.isDirectory() ? 'directory' : 'file'
+        };
+        await enrichEntryWithStats(item);
+        items.push(item);
+    }
+
+    return items.sort((a, b) => {
+        if (a.type !== b.type) {
+            return a.type === 'directory' ? -1 : 1;
+        }
+        return a.name.localeCompare(b.name);
+    });
+}
+
+async function searchProjectEntries(projectRoot, query, options = {}) {
+    const lowerQuery = query.toLowerCase();
+    const showHidden = Boolean(options.showHidden);
+    const limit = clampLimit(options.limit, 120);
+    const searchType = options.searchType || 'file';
+
+    const includeFiles = searchType === 'all' || searchType === 'file';
+    const includeDirectories = searchType === 'all' || searchType === 'directory';
+
+    const stack = [path.resolve(projectRoot)];
+    const results = [];
+    let truncated = false;
+
+    while (stack.length > 0) {
+        const currentPath = stack.pop();
+        let entries;
+        try {
+            entries = await fsPromises.readdir(currentPath, { withFileTypes: true });
+        } catch (error) {
+            if (error.code === 'EACCES' || error.code === 'EPERM') {
+                continue;
+            }
+            throw error;
+        }
+
+        const sortedEntries = entries
+            .filter((entry) => !shouldIgnoreEntry(entry.name, showHidden))
+            .sort((a, b) => {
+                if (a.isDirectory() !== b.isDirectory()) {
+                    return a.isDirectory() ? -1 : 1;
+                }
+                return a.name.localeCompare(b.name);
+            });
+
+        for (const entry of sortedEntries) {
+            const itemPath = path.join(currentPath, entry.name);
+            const relativePath = path.relative(projectRoot, itemPath).split(path.sep).join('/');
+            const haystack = `${entry.name} ${relativePath}`.toLowerCase();
+            const isDir = entry.isDirectory();
+            const isFile = entry.isFile();
+
+            if (isDir) {
+                stack.push(itemPath);
+            }
+
+            const matches = haystack.includes(lowerQuery);
+            if (!matches) {
+                continue;
+            }
+
+            if ((isFile && includeFiles) || (isDir && includeDirectories)) {
+                results.push({
+                    name: entry.name,
+                    path: itemPath,
+                    relativePath,
+                    type: isDir ? 'directory' : 'file'
+                });
+            }
+
+            if (results.length >= limit) {
+                truncated = true;
+                break;
+            }
+        }
+
+        if (truncated) {
+            break;
+        }
+    }
+
+    return { results, truncated };
+}
+
 async function getFileTree(dirPath, maxDepth = 3, currentDepth = 0, showHidden = true) {
     // Using fsPromises from import
     const items = [];
@@ -1907,13 +2172,7 @@ async function getFileTree(dirPath, maxDepth = 3, currentDepth = 0, showHidden =
             // Debug: log all entries including hidden files
 
 
-            // Skip heavy build directories and VCS directories
-            if (entry.name === 'node_modules' ||
-                entry.name === 'dist' ||
-                entry.name === 'build' ||
-                entry.name === '.git' ||
-                entry.name === '.svn' ||
-                entry.name === '.hg') continue;
+            if (shouldIgnoreEntry(entry.name, showHidden)) continue;
 
             const itemPath = path.join(dirPath, entry.name);
             const item = {
@@ -1923,25 +2182,7 @@ async function getFileTree(dirPath, maxDepth = 3, currentDepth = 0, showHidden =
             };
 
             // Get file stats for additional metadata
-            try {
-                const stats = await fsPromises.stat(itemPath);
-                item.size = stats.size;
-                item.modified = stats.mtime.toISOString();
-
-                // Convert permissions to rwx format
-                const mode = stats.mode;
-                const ownerPerm = (mode >> 6) & 7;
-                const groupPerm = (mode >> 3) & 7;
-                const otherPerm = mode & 7;
-                item.permissions = ((mode >> 6) & 7).toString() + ((mode >> 3) & 7).toString() + (mode & 7).toString();
-                item.permissionsRwx = permToRwx(ownerPerm) + permToRwx(groupPerm) + permToRwx(otherPerm);
-            } catch (statError) {
-                // If stat fails, provide default values
-                item.size = 0;
-                item.modified = null;
-                item.permissions = '000';
-                item.permissionsRwx = '---------';
-            }
+            await enrichEntryWithStats(item);
 
             if (entry.isDirectory() && currentDepth < maxDepth) {
                 // Recursively get subdirectories but limit depth

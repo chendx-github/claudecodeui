@@ -101,6 +101,34 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ filePath, content }),
     }),
+  listFiles: (projectName, directoryPath = null, options = {}) => {
+    const params = new URLSearchParams();
+    if (directoryPath) params.append('path', directoryPath);
+    return authenticatedFetch(
+      `/api/projects/${projectName}/files/list?${params.toString()}`,
+      options,
+    );
+  },
+  searchFiles: (projectName, query, options = {}) => {
+    const {
+      limit,
+      type,
+      showHidden,
+      ...fetchOptions
+    } = options;
+    const params = new URLSearchParams();
+    if (query) params.append('q', query);
+    if (limit) params.append('limit', String(limit));
+    if (type) params.append('type', type);
+    if (showHidden !== undefined) {
+      params.append('showHidden', showHidden ? 'true' : 'false');
+    }
+
+    return authenticatedFetch(
+      `/api/projects/${projectName}/files/search?${params.toString()}`,
+      fetchOptions,
+    );
+  },
   getFiles: (projectName, options = {}) =>
     authenticatedFetch(`/api/projects/${projectName}/files`, options),
   transcribe: (formData) =>
