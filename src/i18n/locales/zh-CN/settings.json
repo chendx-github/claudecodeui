@@ -64,6 +64,7 @@
     "showThinking": "显示思考过程",
     "showInjectedContext": "显示注入的 AGENTS 上下文",
     "autoScrollToBottom": "自动滚动到底部",
+    "showIgnoredDirectories": "在文件面板显示被忽略目录",
     "sendByCtrlEnter": "使用 Ctrl+Enter 发送",
     "sendByCtrlEnterDescription": "启用后，按 Ctrl+Enter 发送消息，而不是仅按 Enter。这对于使用输入法的用户可以避免意外发送。",
     "dragHandle": {
@@ -359,7 +360,7 @@
       "modes": {
         "default": {
           "title": "默认",
-          "description": "只有受信任的命令（ls、cat、grep、git status 等）会自动运行。其他命令将被跳过。可以写入工作区。"
+          "description": "遵循你本地 Codex CLI 默认行为和 ~/.codex/config.toml。UI 不再强制覆盖沙箱/审批参数。"
         },
         "acceptEdits": {
           "title": "接受编辑",
@@ -372,7 +373,7 @@
       },
       "technicalDetails": "技术详情",
       "technicalInfo": {
-        "default": "sandboxMode=workspace-write, approvalPolicy=untrusted。受信任的命令：cat、cd、grep、head、ls、pwd、tail、git status/log/diff/show、find（不带 -exec）等。",
+        "default": "不会显式传入 --sandbox 或 approval_policy 覆盖参数，完全使用 Codex CLI 本地默认/配置。",
         "acceptEdits": "sandboxMode=workspace-write, approvalPolicy=never。所有命令在项目目录内自动执行。",
         "bypassPermissions": "sandboxMode=danger-full-access, approvalPolicy=never。完全系统访问权限，仅在可信环境中使用。",
         "overrideNote": "您可以使用聊天界面中的模式按钮按会话覆盖此设置。"

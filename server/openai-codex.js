@@ -303,8 +303,10 @@ function mapPermissionModeToCodexOptions(permissionMode) {
     case 'default':
     default:
       return {
-        sandboxMode: 'workspace-write',
-        approvalPolicy: 'untrusted'
+        // Do not force sandbox/approval in default mode.
+        // Let the local Codex CLI and ~/.codex/config.toml decide.
+        sandboxMode: null,
+        approvalPolicy: null
       };
   }
 }

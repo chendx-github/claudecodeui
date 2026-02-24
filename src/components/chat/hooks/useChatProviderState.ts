@@ -29,6 +29,12 @@ const VALID_PERMISSION_MODES: PermissionMode[] = [
   'plan',
 ];
 
+const VALID_CODEX_PERMISSION_MODES: PermissionMode[] = [
+  'default',
+  'acceptEdits',
+  'bypassPermissions',
+];
+
 function getStoredProvider(): SessionProvider {
   if (typeof window === 'undefined') {
     return 'claude';
@@ -36,8 +42,34 @@ function getStoredProvider(): SessionProvider {
   return (localStorage.getItem('selected-provider') as SessionProvider) || 'claude';
 }
 
+function getStoredCodexPermissionMode(): PermissionMode | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  try {
+    const raw = localStorage.getItem('codex-settings');
+    if (!raw) {
+      return null;
+    }
+
+    const parsed = JSON.parse(raw);
+    const mode = parsed?.permissionMode as PermissionMode | undefined;
+    if (mode && VALID_CODEX_PERMISSION_MODES.includes(mode)) {
+      return mode;
+    }
+  } catch (error) {
+    console.error('Error reading codex-settings permission mode:', error);
+  }
+
+  return null;
+}
+
 function getDefaultPermissionMode(provider: SessionProvider): PermissionMode {
-  return provider === 'codex' ? 'bypassPermissions' : 'default';
+  if (provider === 'codex') {
+    return getStoredCodexPermissionMode() || 'bypassPermissions';
+  }
+  return 'default';
 }
 
 export function useChatProviderState({ selectedSession }: UseChatProviderStateArgs) {
@@ -96,6 +128,11 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
 
   useEffect(() => {
     const defaultMode = getDefaultPermissionMode(provider);
+
+    if (provider === 'codex') {
+      setPermissionMode(defaultMode);
+      return;
+    }
 
     if (!selectedSession?.id) {
       setPermissionMode(defaultMode);
@@ -201,6 +238,21 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
     const nextIndex = (currentIndex + 1) % modes.length;
     const nextMode = modes[nextIndex];
     setPermissionMode(nextMode);
+
+    if (provider === 'codex') {
+      try {
+        const raw = localStorage.getItem('codex-settings');
+        const parsed = raw ? JSON.parse(raw) : {};
+        const nextCodexSettings = {
+          ...parsed,
+          permissionMode: nextMode,
+        };
+        localStorage.setItem('codex-settings', JSON.stringify(nextCodexSettings));
+      } catch (error) {
+        console.error('Error saving codex-settings permission mode:', error);
+      }
+      return;
+    }
 
     if (selectedSession?.id) {
       localStorage.setItem(`permissionMode-${selectedSession.id}`, nextMode);

@@ -463,6 +463,16 @@ export function useChatComposerState({
     noKeyboard: true,
   });
 
+  const [isInputFocused, setIsInputFocused] = useState(false);
+
+  const handleInputFocusChange = useCallback(
+    (focused: boolean) => {
+      setIsInputFocused(focused);
+      onInputFocusChange?.(focused);
+    },
+    [onInputFocusChange],
+  );
+
   const handleSubmit = useCallback(
     async (
       event: FormEvent<HTMLFormElement> | MouseEvent | TouchEvent | KeyboardEvent<HTMLTextAreaElement>,
@@ -472,6 +482,11 @@ export function useChatComposerState({
       if (!currentInput.trim() || isLoading || !selectedProject) {
         return;
       }
+
+      // Mobile browsers can miss blur/focus updates when Enter submits and textarea
+      // gets disabled while streaming; force-sync focus state to restore bottom UI.
+      textareaRef.current?.blur();
+      handleInputFocusChange(false);
 
       let messageContent = currentInput;
       const selectedThinkingMode = thinkingModes.find((mode: { id: string; prefix?: string }) => mode.id === thinkingMode);
@@ -639,6 +654,7 @@ export function useChatComposerState({
       codexModel,
       currentSessionId,
       cursorModel,
+      handleInputFocusChange,
       isLoading,
       onSessionActive,
       pendingViewSessionRef,
@@ -903,15 +919,13 @@ export function useChatComposerState({
     [sendMessage, setClaudeStatus, setPendingPermissionRequests],
   );
 
-  const [isInputFocused, setIsInputFocused] = useState(false);
+  useEffect(() => {
+    if (!isLoading || !isInputFocused) {
+      return;
+    }
 
-  const handleInputFocusChange = useCallback(
-    (focused: boolean) => {
-      setIsInputFocused(focused);
-      onInputFocusChange?.(focused);
-    },
-    [onInputFocusChange],
-  );
+    handleInputFocusChange(false);
+  }, [handleInputFocusChange, isInputFocused, isLoading]);
 
   useEffect(() => {
     if (!isInputFocused || typeof window === 'undefined') {

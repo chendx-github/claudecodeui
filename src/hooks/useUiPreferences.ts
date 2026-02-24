@@ -7,6 +7,7 @@ type UiPreferences = {
   showInjectedContext: boolean;
   autoScrollToBottom: boolean;
   sendByCtrlEnter: boolean;
+  includeIgnoredDirectories: boolean;
   sidebarVisible: boolean;
 };
 
@@ -40,6 +41,7 @@ const DEFAULTS: UiPreferences = {
   showInjectedContext: false,
   autoScrollToBottom: true,
   sendByCtrlEnter: false,
+  includeIgnoredDirectories: true,
   sidebarVisible: true,
 };
 

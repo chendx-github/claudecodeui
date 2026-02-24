@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ScrollArea } from './ui/scroll-area';
 import { Button } from './ui/button';
@@ -10,11 +10,13 @@ import {
   Hash, Braces, Terminal, Database, Globe, Palette, Music2, Video, Archive,
   Lock, Shield, Settings, Image, BookOpen, Cpu, Box, Gem, Coffee,
   Flame, Hexagon, FileCode2, Code2, Cog, FileWarning, Binary, SquareFunction,
-  Scroll, FlaskConical, NotebookPen, FileCheck, Workflow, Blocks
+  Scroll, FlaskConical, NotebookPen, FileCheck, Workflow, Blocks,
+  Download, Upload, Loader2
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import ImageViewer from './ImageViewer';
 import { api } from '../utils/api';
+import { useUiPreferences } from '../hooks/useUiPreferences';
 
 // ─── File Icon Registry ──────────────────────────────────────────────
 // Maps file extensions (and special filenames) to { icon, colorClass } pairs.
@@ -256,11 +258,40 @@ function getFileIconData(filename) {
   return { icon: File, color: 'text-muted-foreground' };
 }
 
+const MOBILE_DOWNLOAD_USER_AGENT_REGEX = /android|iphone|ipad|ipod|mobile|harmonyos|silk/i;
+
+function shouldUseNativeDownloadFlow() {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+    return false;
+  }
+
+  const userAgent = navigator.userAgent || '';
+  const isMobileUserAgent = MOBILE_DOWNLOAD_USER_AGENT_REGEX.test(userAgent);
+  const isCoarsePointer = typeof window.matchMedia === 'function'
+    ? window.matchMedia('(pointer: coarse)').matches
+    : false;
+
+  return isMobileUserAgent || isCoarsePointer;
+}
+
+function triggerDirectBrowserDownload(url) {
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.target = '_blank';
+  anchor.rel = 'noopener noreferrer';
+  anchor.style.display = 'none';
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+}
+
 
 // ─── Component ───────────────────────────────────────────────────────
 
 function FileTree({ selectedProject, onFileOpen }) {
   const { t } = useTranslation();
+  const { preferences } = useUiPreferences();
+  const { includeIgnoredDirectories } = preferences;
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [expandedDirs, setExpandedDirs] = useState(new Set());
@@ -272,6 +303,10 @@ function FileTree({ selectedProject, onFileOpen }) {
   const [searchResults, setSearchResults] = useState([]);
   const [searching, setSearching] = useState(false);
   const [searchTruncated, setSearchTruncated] = useState(false);
+  const [uploadingTargetPath, setUploadingTargetPath] = useState(null);
+  const [downloadingTargetPath, setDownloadingTargetPath] = useState(null);
+  const [pendingUploadTarget, setPendingUploadTarget] = useState(null);
+  const uploadInputRef = useRef(null);
 
   const hasSearchQuery = searchQuery.trim().length > 0;
 
@@ -282,7 +317,7 @@ function FileTree({ selectedProject, onFileOpen }) {
     }
   }, []);
 
-  useEffect(() => {
+  const fetchRootFiles = useCallback(async () => {
     if (!selectedProject?.name) {
       setFiles([]);
       setExpandedDirs(new Set());
@@ -291,32 +326,34 @@ function FileTree({ selectedProject, onFileOpen }) {
       return;
     }
 
-    const fetchRootFiles = async () => {
-      setLoading(true);
-      try {
-        const response = await api.listFiles(selectedProject.name);
-        if (!response.ok) {
-          const errorText = await response.text();
-          console.error('❌ Root file fetch failed:', response.status, errorText);
-          setFiles([]);
-          return;
-        }
-
-        const data = await response.json();
-        setFiles(Array.isArray(data.items) ? data.items : []);
-        setExpandedDirs(new Set());
-        setLoadedDirs(new Set());
-        setLoadingDirs(new Set());
-      } catch (error) {
-        console.error('❌ Error fetching root files:', error);
+    setLoading(true);
+    try {
+      const response = await api.listFiles(selectedProject.name, null, {
+        includeIgnored: includeIgnoredDirectories,
+      });
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ Root file fetch failed:', response.status, errorText);
         setFiles([]);
-      } finally {
-        setLoading(false);
+        return;
       }
-    };
 
-    fetchRootFiles();
-  }, [selectedProject?.name]);
+      const data = await response.json();
+      setFiles(Array.isArray(data.items) ? data.items : []);
+      setExpandedDirs(new Set());
+      setLoadedDirs(new Set());
+      setLoadingDirs(new Set());
+    } catch (error) {
+      console.error('❌ Error fetching root files:', error);
+      setFiles([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [includeIgnoredDirectories, selectedProject?.name]);
+
+  useEffect(() => {
+    void fetchRootFiles();
+  }, [fetchRootFiles]);
 
   useEffect(() => {
     const query = searchQuery.trim();
@@ -335,6 +372,7 @@ function FileTree({ selectedProject, onFileOpen }) {
         const response = await api.searchFiles(selectedProject.name, query, {
           limit: 120,
           type: 'file',
+          includeIgnored: includeIgnoredDirectories,
           signal: controller.signal,
         });
 
@@ -372,7 +410,7 @@ function FileTree({ selectedProject, onFileOpen }) {
       clearTimeout(timeoutId);
       controller.abort();
     };
-  }, [selectedProject?.name, searchQuery]);
+  }, [includeIgnoredDirectories, selectedProject?.name, searchQuery]);
 
   const updateDirectoryChildren = (items, targetPath, newChildren) => {
     return items.map((item) => {
@@ -407,7 +445,9 @@ function FileTree({ selectedProject, onFileOpen }) {
     });
 
     try {
-      const response = await api.listFiles(selectedProject.name, dirPath);
+      const response = await api.listFiles(selectedProject.name, dirPath, {
+        includeIgnored: includeIgnoredDirectories,
+      });
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -504,6 +544,132 @@ function FileTree({ selectedProject, onFileOpen }) {
     }
   };
 
+  const handleDownloadFile = async (item, event) => {
+    event.stopPropagation();
+    if (!selectedProject?.name || item.type !== 'file') {
+      return;
+    }
+
+    setDownloadingTargetPath(item.path);
+    try {
+      if (shouldUseNativeDownloadFlow()) {
+        const downloadUrl = api.getFileContentUrl(selectedProject.name, item.path, {
+          download: true,
+          includeAuthToken: true,
+          filename: item.name,
+        });
+        triggerDirectBrowserDownload(downloadUrl);
+        return;
+      }
+
+      const response = await api.downloadFile(selectedProject.name, item.path, {
+        download: true,
+        filename: item.name,
+      });
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ Download failed:', response.status, errorText);
+        return;
+      }
+
+      const blob = await response.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = objectUrl;
+      anchor.download = item.name || 'download';
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch (error) {
+      console.error('❌ Download error:', error);
+      if (shouldUseNativeDownloadFlow()) {
+        const fallbackDownloadUrl = api.getFileContentUrl(selectedProject.name, item.path, {
+          download: true,
+          includeAuthToken: true,
+          filename: item.name,
+        });
+        triggerDirectBrowserDownload(fallbackDownloadUrl);
+      }
+    } finally {
+      setDownloadingTargetPath((previous) => (previous === item.path ? null : previous));
+    }
+  };
+
+  const triggerUploadForItem = (item, event) => {
+    event.stopPropagation();
+    setPendingUploadTarget(item);
+    if (uploadInputRef.current) {
+      uploadInputRef.current.value = '';
+      uploadInputRef.current.click();
+    }
+  };
+
+  const handleUploadInputChange = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file || !pendingUploadTarget || !selectedProject?.name) {
+      return;
+    }
+
+    setUploadingTargetPath(pendingUploadTarget.path);
+    try {
+      const response = await api.uploadFile(selectedProject.name, pendingUploadTarget.path, file, {
+        overwrite: true,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ Upload failed:', response.status, errorText);
+        return;
+      }
+
+      await fetchRootFiles();
+    } catch (error) {
+      console.error('❌ Upload error:', error);
+    } finally {
+      setUploadingTargetPath(null);
+      setPendingUploadTarget(null);
+      if (uploadInputRef.current) {
+        uploadInputRef.current.value = '';
+      }
+    }
+  };
+
+  const renderItemActions = (item) => {
+    const isUploading = uploadingTargetPath === item.path;
+    const isDownloading = downloadingTargetPath === item.path;
+
+    return (
+      <span
+        className="flex items-center gap-0.5 ml-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
+        onClick={(event) => event.stopPropagation()}
+      >
+        {item.type === 'file' && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 w-6 p-0"
+            onClick={(event) => void handleDownloadFile(item, event)}
+            title={t('fileTree.downloadFile')}
+            disabled={isDownloading || isUploading}
+          >
+            {isDownloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+          </Button>
+        )}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 w-6 p-0"
+          onClick={(event) => triggerUploadForItem(item, event)}
+          title={item.type === 'file' ? t('fileTree.uploadReplace') : t('fileTree.uploadToDirectory')}
+          disabled={isUploading}
+        >
+          {isUploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+        </Button>
+      </span>
+    );
+  };
+
   const renderLoadedChildren = (item, level, renderFn) => {
     if (item.type !== 'directory' || !expandedDirs.has(item.path)) {
       return null;
@@ -578,7 +744,7 @@ function FileTree({ selectedProject, onFileOpen }) {
         <div key={item.path} className="select-none">
           <div
             className={cn(
-              'group flex items-center gap-1.5 py-[3px] pr-2 cursor-pointer rounded-sm',
+              'group flex items-center justify-between gap-1.5 py-[3px] pr-2 cursor-pointer rounded-sm',
               'hover:bg-accent/60 transition-colors duration-100',
               isDir && isOpen && 'border-l-2 border-primary/30',
               isDir && !isOpen && 'border-l-2 border-transparent',
@@ -586,14 +752,17 @@ function FileTree({ selectedProject, onFileOpen }) {
             )}
             style={{ paddingLeft: `${level * 16 + 4}px` }}
             onClick={() => handleItemClick(item)}
-	          >
-            {renderItemIcons(item)}
-            <span className={cn(
-              'text-[13px] leading-tight truncate',
-              isDir ? 'font-medium text-foreground' : 'text-foreground/90'
-            )}>
-              {item.name}
-            </span>
+		          >
+            <div className="flex items-center gap-1.5 min-w-0">
+              {renderItemIcons(item)}
+              <span className={cn(
+                'text-[13px] leading-tight truncate',
+                isDir ? 'font-medium text-foreground' : 'text-foreground/90'
+              )}>
+                {item.name}
+              </span>
+            </div>
+            {renderItemActions(item)}
           </div>
 
           {renderLoadedChildren(item, level, renderFileTree)}
@@ -635,8 +804,11 @@ function FileTree({ selectedProject, onFileOpen }) {
             <div className="col-span-3 text-sm text-muted-foreground">
               {formatRelativeTime(item.modified)}
             </div>
-            <div className="col-span-2 text-sm text-muted-foreground font-mono">
-              {item.permissionsRwx || ''}
+            <div className="col-span-2 flex items-center justify-between gap-2 min-w-0">
+              <span className="text-sm text-muted-foreground font-mono truncate">
+                {item.permissionsRwx || ''}
+              </span>
+              {renderItemActions(item)}
             </div>
           </div>
 
@@ -680,6 +852,7 @@ function FileTree({ selectedProject, onFileOpen }) {
                   <span className="font-mono">{item.permissionsRwx}</span>
                 </>
               )}
+              {renderItemActions(item)}
             </div>
           </div>
 
@@ -717,16 +890,19 @@ function FileTree({ selectedProject, onFileOpen }) {
         {searchResults.map((item) => (
           <div
             key={item.path}
-            className="group flex items-start gap-2 px-2 py-1.5 rounded-sm hover:bg-accent/60 cursor-pointer"
+            className="group flex items-start justify-between gap-2 px-2 py-1.5 rounded-sm hover:bg-accent/60 cursor-pointer"
             onClick={() => handleItemClick(item)}
           >
-            <span className="mt-0.5 flex-shrink-0 ml-[18px]">{getFileIcon(item.name)}</span>
-            <div className="min-w-0">
-              <div className="text-[13px] leading-tight truncate text-foreground/90">{item.name}</div>
-              <div className="text-[11px] leading-tight text-muted-foreground font-mono truncate">
-                {item.relativePath || item.path}
+            <div className="flex items-start gap-2 min-w-0">
+              <span className="mt-0.5 flex-shrink-0 ml-[18px]">{getFileIcon(item.name)}</span>
+              <div className="min-w-0">
+                <div className="text-[13px] leading-tight truncate text-foreground/90">{item.name}</div>
+                <div className="text-[11px] leading-tight text-muted-foreground font-mono truncate">
+                  {item.relativePath || item.path}
+                </div>
               </div>
             </div>
+            {renderItemActions(item)}
           </div>
         ))}
         {searchTruncated && (
@@ -752,6 +928,15 @@ function FileTree({ selectedProject, onFileOpen }) {
   // ─── Main render ───────────────────────────────────────────────────
   return (
     <div className="h-full flex flex-col bg-background">
+      <input
+        ref={uploadInputRef}
+        type="file"
+        className="hidden"
+        onChange={(event) => {
+          void handleUploadInputChange(event);
+        }}
+      />
+
       {/* Header */}
       <div className="px-3 pt-3 pb-2 border-b border-border space-y-2">
         <div className="flex items-center justify-between">
@@ -759,6 +944,24 @@ function FileTree({ selectedProject, onFileOpen }) {
             {t('fileTree.files')}
           </h3>
           <div className="flex gap-0.5">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 w-7 p-0"
+              onClick={(event) => triggerUploadForItem({
+                name: selectedProject?.name || 'project',
+                path: selectedProject?.path || '',
+                type: 'directory',
+              }, event)}
+              title={t('fileTree.uploadToProjectRoot')}
+              disabled={uploadingTargetPath === (selectedProject?.path || '')}
+            >
+              {uploadingTargetPath === (selectedProject?.path || '') ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <Upload className="w-3.5 h-3.5" />
+              )}
+            </Button>
             <Button
               variant={viewMode === 'simple' ? 'default' : 'ghost'}
               size="sm"

@@ -246,7 +246,23 @@ const server = HTTPS_ENABLED
     : http.createServer(app);
 
 const ptySessionsMap = new Map();
-const PTY_SESSION_TIMEOUT = 30 * 60 * 1000;
+const DEFAULT_PTY_SESSION_TIMEOUT_MS = 30 * 60 * 1000;
+
+function parsePtySessionTimeoutMs(value) {
+    if (value === undefined || value === null || String(value).trim() === '') {
+        return DEFAULT_PTY_SESSION_TIMEOUT_MS;
+    }
+
+    const parsed = Number.parseInt(String(value), 10);
+    if (Number.isNaN(parsed) || parsed < 0) {
+        console.warn(`[WARN] Invalid PTY_SESSION_TIMEOUT_MS="${value}". Using default ${DEFAULT_PTY_SESSION_TIMEOUT_MS}ms.`);
+        return DEFAULT_PTY_SESSION_TIMEOUT_MS;
+    }
+
+    return parsed;
+}
+
+const PTY_SESSION_TIMEOUT = parsePtySessionTimeoutMs(process.env.PTY_SESSION_TIMEOUT_MS);
 const SHELL_URL_PARSE_BUFFER_LIMIT = 32768;
 const ANSI_ESCAPE_SEQUENCE_REGEX = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1B\\))/g;
 const TRAILING_URL_PUNCTUATION_REGEX = /[)\]}>.,;:!?]+$/;
@@ -774,11 +790,14 @@ app.get('/api/projects/:projectName/file', authenticateToken, async (req, res) =
     }
 });
 
-// Serve binary file content endpoint (for images, etc.)
+// Serve file content endpoint (inline preview + download attachment mode)
 app.get('/api/projects/:projectName/files/content', authenticateToken, async (req, res) => {
     try {
         const { projectName } = req.params;
-        const { path: filePath } = req.query;
+        const rawFilePath = req.query.path;
+        const filePath = typeof rawFilePath === 'string' ? rawFilePath : null;
+        const forceDownload = parseBooleanQueryValue(req.query.download, false);
+        const requestedFilename = typeof req.query.filename === 'string' ? req.query.filename.trim() : '';
 
 
         // Security: ensure the requested path is inside the project root
@@ -791,22 +810,28 @@ app.get('/api/projects/:projectName/files/content', authenticateToken, async (re
             return res.status(404).json({ error: 'Project not found' });
         }
 
-        const resolved = path.resolve(filePath);
-        const normalizedRoot = path.resolve(projectRoot) + path.sep;
-        if (!resolved.startsWith(normalizedRoot)) {
-            return res.status(403).json({ error: 'Path must be under project root' });
-        }
+        const resolved = resolvePathUnderProjectRoot(projectRoot, filePath);
 
-        // Check if file exists
+        let stats;
         try {
-            await fsPromises.access(resolved);
-        } catch (error) {
+            stats = await fsPromises.stat(resolved);
+        } catch (_error) {
             return res.status(404).json({ error: 'File not found' });
         }
+        if (stats.isDirectory()) {
+            return res.status(400).json({ error: 'Path is a directory' });
+        }
 
-        // Get file extension and set appropriate content type
+        // Set content headers.
         const mimeType = mime.lookup(resolved) || 'application/octet-stream';
         res.setHeader('Content-Type', mimeType);
+        res.setHeader('Content-Length', String(stats.size));
+
+        if (forceDownload) {
+            const preferredFileName = requestedFilename || path.basename(resolved) || 'download';
+            res.setHeader('Content-Disposition', buildAttachmentContentDisposition(preferredFileName));
+            res.setHeader('X-Content-Type-Options', 'nosniff');
+        }
 
         // Stream the file
         const fileStream = fs.createReadStream(resolved);
@@ -877,10 +902,106 @@ app.put('/api/projects/:projectName/file', authenticateToken, async (req, res) =
     }
 });
 
+// Upload file endpoint (supports overwrite)
+app.post('/api/projects/:projectName/files/upload', authenticateToken, async (req, res) => {
+    try {
+        const multer = (await import('multer')).default;
+        const upload = multer({
+            storage: multer.memoryStorage(),
+            limits: { fileSize: 100 * 1024 * 1024 }, // 100MB
+        });
+
+        upload.single('file')(req, res, async (err) => {
+            if (err) {
+                return res.status(400).json({ error: err.message || 'File upload failed' });
+            }
+
+            try {
+                const file = req.file;
+                if (!file) {
+                    return res.status(400).json({ error: 'No file provided' });
+                }
+
+                const projectRoot = await resolveProjectRootPath(req.params.projectName);
+                const overwrite = parseBooleanQueryValue(req.body?.overwrite, true);
+                const targetPathInput = typeof req.body?.targetPath === 'string' && req.body.targetPath.trim()
+                    ? req.body.targetPath.trim()
+                    : projectRoot;
+
+                const targetPath = resolvePathUnderProjectRoot(projectRoot, targetPathInput);
+                const uploadName = path.basename(file.originalname || '') || 'uploaded-file';
+
+                let destinationPath = targetPath;
+                try {
+                    const targetStats = await fsPromises.stat(targetPath);
+                    if (targetStats.isDirectory()) {
+                        destinationPath = path.join(targetPath, uploadName);
+                    }
+                } catch (error) {
+                    if (error.code !== 'ENOENT') {
+                        throw error;
+                    }
+                }
+
+                destinationPath = resolvePathUnderProjectRoot(projectRoot, destinationPath);
+
+                let existed = false;
+                try {
+                    const existingStats = await fsPromises.stat(destinationPath);
+                    if (existingStats.isDirectory()) {
+                        return res.status(400).json({ error: 'Destination path is a directory' });
+                    }
+                    existed = true;
+                } catch (error) {
+                    if (error.code !== 'ENOENT') {
+                        throw error;
+                    }
+                }
+
+                if (existed && !overwrite) {
+                    return res.status(409).json({ error: 'File already exists' });
+                }
+
+                const parentDirectory = path.dirname(destinationPath);
+                const parentStats = await fsPromises.stat(parentDirectory);
+                if (!parentStats.isDirectory()) {
+                    return res.status(400).json({ error: 'Destination parent is not a directory' });
+                }
+
+                await fsPromises.writeFile(destinationPath, file.buffer);
+
+                return res.json({
+                    success: true,
+                    path: destinationPath,
+                    overwritten: existed,
+                    size: file.size,
+                    originalName: uploadName,
+                });
+            } catch (error) {
+                console.error('[ERROR] File upload error:', error);
+                if (error.message === 'Path must be under project root') {
+                    return res.status(403).json({ error: error.message });
+                }
+                if (error.code === 'ENOENT') {
+                    return res.status(404).json({ error: 'Destination path not found' });
+                }
+                if (error.code === 'EACCES' || error.code === 'EPERM') {
+                    return res.status(403).json({ error: 'Permission denied' });
+                }
+                return res.status(500).json({ error: error.message });
+            }
+        });
+    } catch (error) {
+        console.error('[ERROR] File upload setup error:', error);
+        res.status(500).json({ error: error.message });
+    }
+});
+
 app.get('/api/projects/:projectName/files/list', authenticateToken, async (req, res) => {
     try {
         const projectRoot = await resolveProjectRootPath(req.params.projectName);
         const showHidden = parseBooleanQueryValue(req.query.showHidden, false);
+        const includeIgnored = parseBooleanQueryValue(req.query.includeIgnored, false);
 
         let targetPath;
         try {
@@ -903,7 +1024,7 @@ app.get('/api/projects/:projectName/files/list', authenticateToken, async (req, 
             return res.status(400).json({ error: 'Path is not a directory' });
         }
 
-        const items = await listDirectoryEntries(targetPath, showHidden);
+        const items = await listDirectoryEntries(targetPath, showHidden, includeIgnored);
         res.json({
             path: targetPath,
             items
@@ -929,6 +1050,7 @@ app.get('/api/projects/:projectName/files/search', authenticateToken, async (req
         }
 
         const showHidden = parseBooleanQueryValue(req.query.showHidden, false);
+        const includeIgnored = parseBooleanQueryValue(req.query.includeIgnored, false);
         const limit = clampLimit(req.query.limit, 120);
         const searchType = req.query.type === 'all' || req.query.type === 'directory'
             ? req.query.type
@@ -937,6 +1059,7 @@ app.get('/api/projects/:projectName/files/search', authenticateToken, async (req
         const projectRoot = await resolveProjectRootPath(req.params.projectName);
         const { results, truncated } = await searchProjectEntries(projectRoot, query, {
             showHidden,
+            includeIgnored,
             limit,
             searchType
         });
@@ -957,6 +1080,7 @@ app.get('/api/projects/:projectName/files/search', authenticateToken, async (req
 
 app.get('/api/projects/:projectName/files', authenticateToken, async (req, res) => {
     try {
+        const includeIgnored = parseBooleanQueryValue(req.query.includeIgnored, false);
 
         // Using fsPromises from import
 
@@ -977,8 +1101,7 @@ app.get('/api/projects/:projectName/files', authenticateToken, async (req, res) 
             return res.status(404).json({ error: `Project path not found: ${actualPath}` });
         }
 
-        const files = await getFileTree(actualPath, 10, 0, true);
-        const hiddenFiles = files.filter(f => f.name.startsWith('.'));
+        const files = await getFileTree(actualPath, 10, 0, true, includeIgnored);
         res.json(files);
     } catch (error) {
         console.error('[ERROR] File tree error:', error.message);
@@ -1513,16 +1636,21 @@ function handleShellConnection(ws) {
         if (ptySessionKey) {
             const session = ptySessionsMap.get(ptySessionKey);
             if (session) {
-                console.log('⏳ PTY session kept alive, will timeout in 30 minutes:', ptySessionKey);
                 session.ws = null;
 
-                session.timeoutId = setTimeout(() => {
-                    console.log('⏰ PTY session timeout, killing process:', ptySessionKey);
-                    if (session.pty && session.pty.kill) {
-                        session.pty.kill();
-                    }
-                    ptySessionsMap.delete(ptySessionKey);
-                }, PTY_SESSION_TIMEOUT);
+                if (PTY_SESSION_TIMEOUT === 0) {
+                    console.log('⏳ PTY session kept alive without timeout (PTY_SESSION_TIMEOUT_MS=0):', ptySessionKey);
+                    session.timeoutId = null;
+                } else {
+                    console.log(`⏳ PTY session kept alive, will timeout in ${PTY_SESSION_TIMEOUT}ms:`, ptySessionKey);
+                    session.timeoutId = setTimeout(() => {
+                        console.log('⏰ PTY session timeout, killing process:', ptySessionKey);
+                        if (session.pty && session.pty.kill) {
+                            session.pty.kill();
+                        }
+                        ptySessionsMap.delete(ptySessionKey);
+                    }, PTY_SESSION_TIMEOUT);
+                }
             }
         }
     });
@@ -1983,14 +2111,38 @@ const IGNORED_DIRECTORY_NAMES = new Set([
     '.hg'
 ]);
 
-function shouldIgnoreEntry(entryName, showHidden = true) {
-    if (IGNORED_DIRECTORY_NAMES.has(entryName)) {
+function shouldIgnoreEntry(entryName, showHidden = true, includeIgnored = false) {
+    if (!includeIgnored && IGNORED_DIRECTORY_NAMES.has(entryName)) {
         return true;
     }
     if (!showHidden && entryName.startsWith('.')) {
         return true;
     }
     return false;
+}
+
+function sanitizeAsciiFilename(filename = 'download') {
+    const normalized = String(filename)
+        .replace(/[\r\n]+/g, ' ')
+        .replace(/[\\"]/g, '_')
+        .replace(/[<>:*?|]/g, '_')
+        .trim();
+
+    const fallback = normalized || 'download';
+    const asciiOnly = fallback.replace(/[^\x20-\x7E]/g, '_').trim();
+    return asciiOnly || 'download';
+}
+
+function encodeRFC5987ValueChars(value) {
+    return encodeURIComponent(value)
+        .replace(/['()]/g, (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`)
+        .replace(/\*/g, '%2A');
+}
+
+function buildAttachmentContentDisposition(filename) {
+    const sanitized = sanitizeAsciiFilename(filename);
+    const utf8Encoded = encodeRFC5987ValueChars(String(filename || sanitized));
+    return `attachment; filename="${sanitized}"; filename*=UTF-8''${utf8Encoded}`;
 }
 
 function parseBooleanQueryValue(value, fallback = false) {
@@ -2061,12 +2213,12 @@ function resolvePathUnderProjectRoot(projectRoot, requestedPath = null) {
     return resolved;
 }
 
-async function listDirectoryEntries(dirPath, showHidden = false) {
+async function listDirectoryEntries(dirPath, showHidden = false, includeIgnored = false) {
     const entries = await fsPromises.readdir(dirPath, { withFileTypes: true });
     const items = [];
 
     for (const entry of entries) {
-        if (shouldIgnoreEntry(entry.name, showHidden)) {
+        if (shouldIgnoreEntry(entry.name, showHidden, includeIgnored)) {
             continue;
         }
 
@@ -2091,6 +2243,7 @@ async function listDirectoryEntries(dirPath, showHidden = false) {
 async function searchProjectEntries(projectRoot, query, options = {}) {
     const lowerQuery = query.toLowerCase();
     const showHidden = Boolean(options.showHidden);
+    const includeIgnored = Boolean(options.includeIgnored);
     const limit = clampLimit(options.limit, 120);
     const searchType = options.searchType || 'file';
 
@@ -2114,7 +2267,7 @@ async function searchProjectEntries(projectRoot, query, options = {}) {
         }
 
         const sortedEntries = entries
-            .filter((entry) => !shouldIgnoreEntry(entry.name, showHidden))
+            .filter((entry) => !shouldIgnoreEntry(entry.name, showHidden, includeIgnored))
             .sort((a, b) => {
                 if (a.isDirectory() !== b.isDirectory()) {
                     return a.isDirectory() ? -1 : 1;
@@ -2161,7 +2314,7 @@ async function searchProjectEntries(projectRoot, query, options = {}) {
     return { results, truncated };
 }
 
-async function getFileTree(dirPath, maxDepth = 3, currentDepth = 0, showHidden = true) {
+async function getFileTree(dirPath, maxDepth = 3, currentDepth = 0, showHidden = true, includeIgnored = false) {
     // Using fsPromises from import
     const items = [];
 
@@ -2172,7 +2325,7 @@ async function getFileTree(dirPath, maxDepth = 3, currentDepth = 0, showHidden =
             // Debug: log all entries including hidden files
 
 
-            if (shouldIgnoreEntry(entry.name, showHidden)) continue;
+            if (shouldIgnoreEntry(entry.name, showHidden, includeIgnored)) continue;
 
             const itemPath = path.join(dirPath, entry.name);
             const item = {
@@ -2189,7 +2342,7 @@ async function getFileTree(dirPath, maxDepth = 3, currentDepth = 0, showHidden =
                 try {
                     // Check if we can access the directory before trying to read it
                     await fsPromises.access(item.path, fs.constants.R_OK);
-                    item.children = await getFileTree(item.path, maxDepth, currentDepth + 1, showHidden);
+                    item.children = await getFileTree(item.path, maxDepth, currentDepth + 1, showHidden, includeIgnored);
                 } catch (e) {
                     // Silently skip directories we can't access (permission denied, etc.)
                     item.children = [];
@@ -2246,6 +2399,11 @@ async function startServer() {
             console.log('');
             if (HTTPS_ENABLED) {
                 console.log(`${c.info('[INFO]')} HTTPS enabled with certificate: ${c.dim(SSL_CERT_PATH)}`);
+            }
+            if (PTY_SESSION_TIMEOUT === 0) {
+                console.log(`${c.info('[INFO]')} PTY disconnect timeout: ${c.bright('disabled')} (${c.dim('PTY_SESSION_TIMEOUT_MS=0')})`);
+            } else {
+                console.log(`${c.info('[INFO]')} PTY disconnect timeout: ${c.bright(PTY_SESSION_TIMEOUT + 'ms')} (${c.dim('set PTY_SESSION_TIMEOUT_MS=0 to disable')})`);
             }
             console.log(`${c.info('[INFO]')} Server URL:  ${c.bright(SERVER_PROTOCOL + '://' + DISPLAY_HOST + ':' + PORT)}`);
             console.log(`${c.info('[INFO]')} Installed at: ${c.dim(appInstallPath)}`);

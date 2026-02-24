@@ -13,7 +13,8 @@ import {
   Sparkles,
   FileText,
   Languages,
-  GripVertical
+  GripVertical,
+  Folder
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import DarkModeToggle from './DarkModeToggle';
@@ -36,7 +37,15 @@ const QuickSettingsPanel = () => {
   const { isMobile } = useDeviceSettings({ trackPWA: false });
 
   const { preferences, setPreference } = useUiPreferences();
-  const { autoExpandTools, showRawParameters, showThinking, showInjectedContext, autoScrollToBottom, sendByCtrlEnter } = preferences;
+  const {
+    autoExpandTools,
+    showRawParameters,
+    showThinking,
+    showInjectedContext,
+    autoScrollToBottom,
+    sendByCtrlEnter,
+    includeIgnoredDirectories,
+  } = preferences;
 
   // Draggable handle state
   const [handlePosition, setHandlePosition] = useState(() => {
@@ -339,6 +348,19 @@ const QuickSettingsPanel = () => {
                   type="checkbox"
                   checked={autoScrollToBottom}
                   onChange={(e) => setPreference('autoScrollToBottom', e.target.checked)}
+                  className="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 dark:text-blue-500 focus:ring-blue-500 focus:ring-2 dark:focus:ring-blue-400 bg-gray-100 dark:bg-gray-800 checked:bg-blue-600 dark:checked:bg-blue-600"
+                />
+              </label>
+
+              <label className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer transition-colors border border-transparent hover:border-gray-300 dark:hover:border-gray-600">
+                <span className="flex items-center gap-2 text-sm text-gray-900 dark:text-white">
+                  <Folder className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                  {t('quickSettings.showIgnoredDirectories')}
+                </span>
+                <input
+                  type="checkbox"
+                  checked={includeIgnoredDirectories}
+                  onChange={(e) => setPreference('includeIgnoredDirectories', e.target.checked)}
                   className="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 dark:text-blue-500 focus:ring-blue-500 focus:ring-2 dark:focus:ring-blue-400 bg-gray-100 dark:bg-gray-800 checked:bg-blue-600 dark:checked:bg-blue-600"
                 />
               </label>

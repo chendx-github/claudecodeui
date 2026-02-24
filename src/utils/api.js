@@ -24,6 +24,32 @@ export const authenticatedFetch = (url, options = {}) => {
   });
 };
 
+const buildProjectFileContentUrl = (projectName, filePath, options = {}) => {
+  const {
+    download = false,
+    includeAuthToken = false,
+    filename = null,
+  } = options;
+
+  const params = new URLSearchParams();
+  params.set('path', filePath);
+
+  if (download) {
+    params.set('download', 'true');
+  }
+  if (filename) {
+    params.set('filename', filename);
+  }
+  if (!IS_PLATFORM && includeAuthToken) {
+    const token = localStorage.getItem('auth-token');
+    if (token) {
+      params.set('token', token);
+    }
+  }
+
+  return `/api/projects/${projectName}/files/content?${params.toString()}`;
+};
+
 // API endpoints
 export const api = {
   // Auth endpoints (no token required)
@@ -102,11 +128,24 @@ export const api = {
       body: JSON.stringify({ filePath, content }),
     }),
   listFiles: (projectName, directoryPath = null, options = {}) => {
+    const {
+      includeIgnored,
+      showHidden,
+      ...fetchOptions
+    } = options;
     const params = new URLSearchParams();
     if (directoryPath) params.append('path', directoryPath);
+    if (showHidden !== undefined) {
+      params.append('showHidden', showHidden ? 'true' : 'false');
+    }
+    if (includeIgnored !== undefined) {
+      params.append('includeIgnored', includeIgnored ? 'true' : 'false');
+    }
+
+    const queryString = params.toString();
     return authenticatedFetch(
-      `/api/projects/${projectName}/files/list?${params.toString()}`,
-      options,
+      `/api/projects/${projectName}/files/list${queryString ? `?${queryString}` : ''}`,
+      fetchOptions,
     );
   },
   searchFiles: (projectName, query, options = {}) => {
@@ -114,6 +153,7 @@ export const api = {
       limit,
       type,
       showHidden,
+      includeIgnored,
       ...fetchOptions
     } = options;
     const params = new URLSearchParams();
@@ -123,11 +163,53 @@ export const api = {
     if (showHidden !== undefined) {
       params.append('showHidden', showHidden ? 'true' : 'false');
     }
+    if (includeIgnored !== undefined) {
+      params.append('includeIgnored', includeIgnored ? 'true' : 'false');
+    }
 
     return authenticatedFetch(
       `/api/projects/${projectName}/files/search?${params.toString()}`,
       fetchOptions,
     );
+  },
+  getFileContentUrl: (projectName, filePath, options = {}) =>
+    buildProjectFileContentUrl(projectName, filePath, options),
+  downloadFile: (projectName, filePath, options = {}) => {
+    const {
+      download = true,
+      filename = null,
+      ...fetchOptions
+    } = options;
+
+    return authenticatedFetch(
+      buildProjectFileContentUrl(projectName, filePath, {
+        download,
+        filename,
+      }),
+      fetchOptions,
+    );
+  },
+  uploadFile: (projectName, targetPath, file, options = {}) => {
+    const {
+      overwrite = true,
+      ...fetchOptions
+    } = options;
+
+    const formData = new FormData();
+    formData.append('file', file);
+    if (targetPath) {
+      formData.append('targetPath', targetPath);
+    }
+    formData.append('overwrite', overwrite ? 'true' : 'false');
+
+    return authenticatedFetch(`/api/projects/${projectName}/files/upload`, {
+      method: 'POST',
+      body: formData,
+      ...fetchOptions,
+      headers: {
+        ...(fetchOptions.headers || {}),
+      },
+    });
   },
   getFiles: (projectName, options = {}) =>
     authenticatedFetch(`/api/projects/${projectName}/files`, options),

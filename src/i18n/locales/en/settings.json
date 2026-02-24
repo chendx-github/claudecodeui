@@ -64,6 +64,7 @@
     "showThinking": "Show thinking",
     "showInjectedContext": "Show injected AGENTS context",
     "autoScrollToBottom": "Auto-scroll to bottom",
+    "showIgnoredDirectories": "Show ignored directories in Files",
     "sendByCtrlEnter": "Send by Ctrl+Enter",
     "sendByCtrlEnterDescription": "When enabled, pressing Ctrl+Enter will send the message instead of just Enter. This is useful for IME users to avoid accidental sends.",
     "dragHandle": {
@@ -359,7 +360,7 @@
       "modes": {
         "default": {
           "title": "Default",
-          "description": "Only trusted commands (ls, cat, grep, git status, etc.) run automatically. Other commands are skipped. Can write to workspace."
+          "description": "Follow your local Codex CLI defaults and ~/.codex/config.toml. No sandbox/approval override is forced by the UI."
         },
         "acceptEdits": {
           "title": "Accept Edits",
@@ -372,7 +373,7 @@
       },
       "technicalDetails": "Technical details",
       "technicalInfo": {
-        "default": "sandboxMode=workspace-write, approvalPolicy=untrusted. Trusted commands: cat, cd, grep, head, ls, pwd, tail, git status/log/diff/show, find (without -exec), etc.",
+        "default": "No explicit --sandbox or approval_policy override is passed. Codex CLI defaults/config are used.",
         "acceptEdits": "sandboxMode=workspace-write, approvalPolicy=never. All commands auto-execute within project directory.",
         "bypassPermissions": "sandboxMode=danger-full-access, approvalPolicy=never. Full system access, use only in trusted environments.",
         "overrideNote": "You can override this per-session using the mode button in the chat interface."
