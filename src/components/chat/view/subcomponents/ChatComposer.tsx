@@ -152,7 +152,8 @@ export default function ChatComposer({
 }: ChatComposerProps) {
   const { t } = useTranslation('chat');
   const AnyCommandMenu = CommandMenu as any;
-  const isInputLocked = isLoading && provider !== 'codex';
+  const isCodexProvider = provider === 'codex' || provider === 'openai';
+  const isInputLocked = isLoading && !isCodexProvider;
   const textareaRect = textareaRef.current?.getBoundingClientRect();
   const commandMenuPosition = {
     top: textareaRect ? Math.max(16, textareaRect.top - 316) : 0,

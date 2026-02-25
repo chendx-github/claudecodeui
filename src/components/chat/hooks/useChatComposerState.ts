@@ -481,7 +481,9 @@ export function useChatComposerState({
     ) => {
       event.preventDefault();
       const currentInput = inputValueRef.current;
-      const shouldBlockSubmit = isLoading && provider !== 'codex';
+      const isCodexConversation =
+        provider === 'codex' || selectedSession?.__provider === 'codex';
+      const shouldBlockSubmit = isLoading && !isCodexConversation;
       if (!currentInput.trim() || shouldBlockSubmit || !selectedProject) {
         return;
       }
@@ -577,7 +579,7 @@ export function useChatComposerState({
       const cursorSessionId =
         typeof window !== 'undefined' ? sessionStorage.getItem('cursorSessionId') : null;
       const providerPendingSessionId =
-        provider === 'cursor' ? cursorSessionId : pendingSessionId;
+        provider === 'cursor' ? cursorSessionId : isCodexConversation ? pendingSessionId : null;
       const effectiveSessionId =
         currentSessionId || selectedSession?.id || providerPendingSessionId;
       const sessionToActivate = effectiveSessionId || `new-session-${Date.now()}`;
@@ -632,7 +634,7 @@ export function useChatComposerState({
             toolsSettings,
           },
         });
-      } else if (provider === 'codex') {
+      } else if (isCodexConversation) {
         sendMessage({
           type: 'codex-command',
           command: messageContent,
@@ -695,6 +697,7 @@ export function useChatComposerState({
       scrollToBottom,
       selectedProject,
       selectedSession?.id,
+      selectedSession?.__provider,
       sendMessage,
       setCanAbortSession,
       setChatMessages,
@@ -952,12 +955,14 @@ export function useChatComposerState({
   );
 
   useEffect(() => {
-    if (!isLoading || !isInputFocused || provider === 'codex') {
+    const isCodexConversation =
+      provider === 'codex' || selectedSession?.__provider === 'codex';
+    if (!isLoading || !isInputFocused || isCodexConversation) {
       return;
     }
 
     handleInputFocusChange(false);
-  }, [handleInputFocusChange, isInputFocused, isLoading, provider]);
+  }, [handleInputFocusChange, isInputFocused, isLoading, provider, selectedSession?.__provider]);
 
   useEffect(() => {
     if (!isInputFocused || typeof window === 'undefined') {
