@@ -152,6 +152,7 @@ export default function ChatComposer({
 }: ChatComposerProps) {
   const { t } = useTranslation('chat');
   const AnyCommandMenu = CommandMenu as any;
+  const isInputLocked = isLoading && provider !== 'codex';
   const textareaRect = textareaRef.current?.getBoundingClientRect();
   const commandMenuPosition = {
     top: textareaRect ? Math.max(16, textareaRect.top - 316) : 0,
@@ -302,7 +303,7 @@ export default function ChatComposer({
               onBlur={() => onInputFocusChange?.(false)}
               onInput={onTextareaInput}
               placeholder={placeholder}
-              disabled={isLoading}
+              disabled={isInputLocked}
               className="chat-input-placeholder block w-full pl-12 pr-20 sm:pr-40 py-1.5 sm:py-4 bg-transparent rounded-2xl focus:outline-none text-foreground placeholder-muted-foreground/50 disabled:opacity-50 resize-none min-h-[50px] sm:min-h-[80px] max-h-[40vh] sm:max-h-[300px] overflow-y-auto text-base leading-6 transition-all duration-200"
               style={{ height: '50px' }}
             />
@@ -329,7 +330,7 @@ export default function ChatComposer({
 
             <button
               type="submit"
-              disabled={!input.trim() || isLoading}
+              disabled={!input.trim() || isInputLocked}
               onMouseDown={(event) => {
                 event.preventDefault();
                 onSubmit(event);

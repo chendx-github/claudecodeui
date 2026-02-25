@@ -481,7 +481,8 @@ export function useChatComposerState({
     ) => {
       event.preventDefault();
       const currentInput = inputValueRef.current;
-      if (!currentInput.trim() || isLoading || !selectedProject) {
+      const shouldBlockSubmit = isLoading && provider !== 'codex';
+      if (!currentInput.trim() || shouldBlockSubmit || !selectedProject) {
         return;
       }
 
@@ -571,8 +572,14 @@ export function useChatComposerState({
       setIsUserScrolledUp(false);
       setTimeout(() => scrollToBottom(), 100);
 
+      const pendingSessionId =
+        typeof window !== 'undefined' ? sessionStorage.getItem('pendingSessionId') : null;
+      const cursorSessionId =
+        typeof window !== 'undefined' ? sessionStorage.getItem('cursorSessionId') : null;
+      const providerPendingSessionId =
+        provider === 'cursor' ? cursorSessionId : pendingSessionId;
       const effectiveSessionId =
-        currentSessionId || selectedSession?.id || sessionStorage.getItem('cursorSessionId');
+        currentSessionId || selectedSession?.id || providerPendingSessionId;
       const sessionToActivate = effectiveSessionId || `new-session-${Date.now()}`;
 
       if (!effectiveSessionId && !selectedSession?.id) {
@@ -945,12 +952,12 @@ export function useChatComposerState({
   );
 
   useEffect(() => {
-    if (!isLoading || !isInputFocused) {
+    if (!isLoading || !isInputFocused || provider === 'codex') {
       return;
     }
 
     handleInputFocusChange(false);
-  }, [handleInputFocusChange, isInputFocused, isLoading]);
+  }, [handleInputFocusChange, isInputFocused, isLoading, provider]);
 
   useEffect(() => {
     if (!isInputFocused || typeof window === 'undefined') {
