@@ -129,6 +129,8 @@ export function useChatComposerState({
     ((event: FormEvent<HTMLFormElement> | MouseEvent | TouchEvent | KeyboardEvent<HTMLTextAreaElement>) => Promise<void>) | null
   >(null);
   const inputValueRef = useRef(input);
+  const conversationProvider = selectedSession?.__provider ?? provider;
+  const isCodexConversation = conversationProvider === 'codex';
 
   const handleBuiltInCommand = useCallback(
     (result: CommandExecutionResult) => {
@@ -286,8 +288,13 @@ export function useChatComposerState({
           projectPath: selectedProject.fullPath || selectedProject.path,
           projectName: selectedProject.name,
           sessionId: currentSessionId,
-          provider,
-          model: provider === 'cursor' ? cursorModel : provider === 'codex' ? codexModel : claudeModel,
+          provider: conversationProvider,
+          model:
+            conversationProvider === 'cursor'
+              ? cursorModel
+              : conversationProvider === 'codex'
+                ? codexModel
+                : claudeModel,
           tokenUsage: tokenBudget,
         };
 
@@ -344,7 +351,7 @@ export function useChatComposerState({
       handleBuiltInCommand,
       handleCustomCommand,
       input,
-      provider,
+      conversationProvider,
       selectedProject,
       setChatMessages,
       tokenBudget,
@@ -481,8 +488,6 @@ export function useChatComposerState({
     ) => {
       event.preventDefault();
       const currentInput = inputValueRef.current;
-      const isCodexConversation =
-        provider === 'codex' || selectedSession?.__provider === 'codex';
       const shouldBlockSubmit = isLoading && !isCodexConversation;
       if (!currentInput.trim() || shouldBlockSubmit || !selectedProject) {
         return;
@@ -578,13 +583,20 @@ export function useChatComposerState({
         typeof window !== 'undefined' ? sessionStorage.getItem('pendingSessionId') : null;
       const cursorSessionId =
         typeof window !== 'undefined' ? sessionStorage.getItem('cursorSessionId') : null;
-      const providerPendingSessionId =
-        provider === 'cursor' ? cursorSessionId : isCodexConversation ? pendingSessionId : null;
+      const providerPendingSessionId = isCodexConversation
+        ? pendingSessionId
+        : conversationProvider === 'cursor'
+          ? cursorSessionId
+          : null;
+      const stableCurrentSessionId = isTemporarySessionId(currentSessionId) ? null : currentSessionId;
+      const stableSelectedSessionId = isTemporarySessionId(selectedSession?.id)
+        ? null
+        : selectedSession?.id || null;
       const effectiveSessionId =
-        currentSessionId || selectedSession?.id || providerPendingSessionId;
+        providerPendingSessionId || stableCurrentSessionId || stableSelectedSessionId;
       const sessionToActivate = effectiveSessionId || `new-session-${Date.now()}`;
 
-      if (!effectiveSessionId && !selectedSession?.id) {
+      if (!effectiveSessionId && !stableSelectedSessionId) {
         if (typeof window !== 'undefined') {
           // Reset stale pending IDs from previous interrupted runs before creating a new one.
           sessionStorage.removeItem('pendingSessionId');
@@ -596,9 +608,9 @@ export function useChatComposerState({
       const getToolsSettings = () => {
         try {
           const settingsKey =
-            provider === 'cursor'
+            conversationProvider === 'cursor'
               ? 'cursor-tools-settings'
-              : provider === 'codex'
+              : conversationProvider === 'codex'
               ? 'codex-settings'
               : 'claude-settings';
           const savedSettings = safeLocalStorage.getItem(settingsKey);
@@ -619,7 +631,7 @@ export function useChatComposerState({
       const toolsSettings = getToolsSettings();
       const resolvedProjectPath = selectedProject.fullPath || selectedProject.path || '';
 
-      if (provider === 'cursor') {
+      if (conversationProvider === 'cursor') {
         sendMessage({
           type: 'cursor-command',
           command: messageContent,
@@ -688,11 +700,12 @@ export function useChatComposerState({
       cursorModel,
       handleInputFocusChange,
       executeCommand,
+      conversationProvider,
+      isCodexConversation,
       isLoading,
       onSessionActive,
       pendingViewSessionRef,
       permissionMode,
-      provider,
       resetCommandMenuState,
       scrollToBottom,
       selectedProject,
@@ -859,6 +872,7 @@ export function useChatComposerState({
       return;
     }
 
+    const abortProvider = selectedSession?.__provider ?? provider;
     const pendingSessionId =
       typeof window !== 'undefined' ? sessionStorage.getItem('pendingSessionId') : null;
     const cursorSessionId =
@@ -868,7 +882,7 @@ export function useChatComposerState({
       currentSessionId,
       pendingViewSessionRef.current?.sessionId || null,
       pendingSessionId,
-      provider === 'cursor' ? cursorSessionId : null,
+      abortProvider === 'cursor' ? cursorSessionId : null,
       selectedSession?.id || null,
     ];
 
@@ -883,9 +897,17 @@ export function useChatComposerState({
     sendMessage({
       type: 'abort-session',
       sessionId: targetSessionId,
-      provider,
+      provider: abortProvider,
     });
-  }, [canAbortSession, currentSessionId, pendingViewSessionRef, provider, selectedSession?.id, sendMessage]);
+  }, [
+    canAbortSession,
+    currentSessionId,
+    pendingViewSessionRef,
+    provider,
+    selectedSession?.id,
+    selectedSession?.__provider,
+    sendMessage,
+  ]);
 
   const handleTranscript = useCallback((text: string) => {
     if (!text.trim()) {
@@ -1037,5 +1059,6 @@ export function useChatComposerState({
     handleGrantToolPermission,
     handleInputFocusChange,
     isInputFocused,
+    isCodexConversation,
   };
 }

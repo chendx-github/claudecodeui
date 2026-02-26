@@ -34,7 +34,6 @@ const VALID_CODEX_PERMISSION_MODES: PermissionMode[] = [
   'acceptEdits',
   'bypassPermissions',
 ];
-
 const VALID_PROVIDERS: SessionProvider[] = ['claude', 'cursor', 'codex'];
 
 function normalizeStoredProvider(rawProvider: string | null): SessionProvider {
@@ -86,7 +85,6 @@ function getDefaultPermissionMode(provider: SessionProvider): PermissionMode {
   }
   return 'default';
 }
-
 export function useChatProviderState({ selectedSession }: UseChatProviderStateArgs) {
   const [provider, setProvider] = useState<SessionProvider>(() => getStoredProvider());
   const [permissionMode, setPermissionMode] = useState<PermissionMode>(() =>

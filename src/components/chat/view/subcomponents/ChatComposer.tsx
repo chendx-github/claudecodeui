@@ -45,6 +45,7 @@ interface ChatComposerProps {
   isLoading: boolean;
   onAbortSession: () => void;
   provider: Provider | string;
+  isCodexConversation: boolean;
   permissionMode: PermissionMode | string;
   onModeSwitch: () => void;
   thinkingMode: string;
@@ -102,6 +103,7 @@ export default function ChatComposer({
   isLoading,
   onAbortSession,
   provider,
+  isCodexConversation,
   permissionMode,
   onModeSwitch,
   thinkingMode,
@@ -152,8 +154,7 @@ export default function ChatComposer({
 }: ChatComposerProps) {
   const { t } = useTranslation('chat');
   const AnyCommandMenu = CommandMenu as any;
-  const isCodexProvider = provider === 'codex' || provider === 'openai';
-  const isInputLocked = isLoading && !isCodexProvider;
+  const isInputLocked = isLoading && !isCodexConversation;
   const textareaRect = textareaRef.current?.getBoundingClientRect();
   const commandMenuPosition = {
     top: textareaRect ? Math.max(16, textareaRect.top - 316) : 0,
