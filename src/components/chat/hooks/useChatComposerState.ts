@@ -540,8 +540,10 @@ export function useChatComposerState({
       const stableSelectedSessionId = isTemporarySessionId(selectedSession?.id)
         ? null
         : selectedSession?.id || null;
+      // Prefer concrete active/selected sessions. Pending IDs are only a fallback
+      // for in-flight temporary sessions to avoid cross-session routing.
       const effectiveSessionId =
-        providerPendingSessionId || stableCurrentSessionId || stableSelectedSessionId;
+        stableCurrentSessionId || stableSelectedSessionId || providerPendingSessionId;
       const sessionToActivate = effectiveSessionId || `new-session-${Date.now()}`;
 
       let uploadedImages: unknown[] = [];
@@ -884,9 +886,9 @@ export function useChatComposerState({
     const candidateSessionIds = [
       currentSessionId,
       pendingViewSessionRef.current?.sessionId || null,
-      pendingSessionId,
-      abortProvider === 'cursor' ? cursorSessionId : null,
       selectedSession?.id || null,
+      abortProvider === 'cursor' ? cursorSessionId : null,
+      pendingSessionId,
     ];
 
     const targetSessionId =
