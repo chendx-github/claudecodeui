@@ -311,6 +311,82 @@ function mapPermissionModeToCodexOptions(permissionMode) {
   }
 }
 
+function getImageFileExtension(image, mimeType) {
+  const mimeExtensionMap = {
+    'image/jpeg': 'jpg',
+    'image/jpg': 'jpg',
+    'image/png': 'png',
+    'image/gif': 'gif',
+    'image/webp': 'webp',
+    'image/svg+xml': 'svg',
+  };
+
+  if (typeof image?.name === 'string') {
+    const ext = path.extname(image.name).toLowerCase().replace('.', '');
+    if (ext) {
+      return ext;
+    }
+  }
+
+  const normalizedMimeType = typeof mimeType === 'string'
+    ? mimeType.trim().toLowerCase()
+    : '';
+  return mimeExtensionMap[normalizedMimeType] || 'png';
+}
+
+async function materializeCodexImages(images) {
+  const imagePaths = [];
+  let tempDir = null;
+
+  if (!Array.isArray(images) || images.length === 0) {
+    return { imagePaths, tempDir };
+  }
+
+  tempDir = path.join(
+    os.tmpdir(),
+    'claudecodeui-codex-images',
+    `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+  );
+  await fs.mkdir(tempDir, { recursive: true });
+
+  for (const [index, image] of images.entries()) {
+    if (!image || typeof image !== 'object' || typeof image.data !== 'string') {
+      continue;
+    }
+
+    const match = image.data.match(/^data:([^;]+);base64,(.+)$/);
+    if (!match) {
+      console.warn('[Codex] Skipping invalid image payload at index:', index);
+      continue;
+    }
+
+    const [, mimeType, base64Data] = match;
+    const extension = getImageFileExtension(image, image.mimeType || mimeType);
+    const imagePath = path.join(tempDir, `image_${index + 1}.${extension}`);
+    await fs.writeFile(imagePath, Buffer.from(base64Data, 'base64'));
+    imagePaths.push(imagePath);
+  }
+
+  if (imagePaths.length === 0 && tempDir) {
+    await fs.rm(tempDir, { recursive: true, force: true });
+    tempDir = null;
+  }
+
+  return { imagePaths, tempDir };
+}
+
+async function cleanupCodexImageTempDir(tempDir) {
+  if (!tempDir) {
+    return;
+  }
+
+  try {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  } catch (error) {
+    console.warn('[Codex] Failed to cleanup temp image directory:', error.message);
+  }
+}
+
 /**
  * Execute a Codex query with streaming
  * @param {string} command - The prompt to send
@@ -323,12 +399,29 @@ export async function queryCodex(command, options = {}, ws) {
     cwd,
     projectPath,
     model,
-    permissionMode = 'default'
+    permissionMode = 'default',
+    images,
   } = options;
 
   const workingDirectory = cwd || projectPath || process.cwd();
   const effectivePermissionMode = await resolveEffectivePermissionMode(permissionMode, workingDirectory);
   const { sandboxMode, approvalPolicy } = mapPermissionModeToCodexOptions(effectivePermissionMode);
+
+  let codexImagePaths = [];
+  let codexTempImageDir = null;
+  try {
+    const imageProcessingResult = await materializeCodexImages(images);
+    codexImagePaths = imageProcessingResult.imagePaths;
+    codexTempImageDir = imageProcessingResult.tempDir;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    sendMessage(ws, {
+      type: 'codex-error',
+      error: `Failed to process images: ${message}`,
+      sessionId: sessionId || null,
+    });
+    return;
+  }
 
   const args = ['exec', '--experimental-json'];
   if (model) {
@@ -345,7 +438,15 @@ export async function queryCodex(command, options = {}, ws) {
     args.push('--config', `approval_policy="${approvalPolicy}"`);
   }
   if (sessionId) {
-    args.push('resume', sessionId);
+    args.push('resume');
+    for (const imagePath of codexImagePaths) {
+      args.push('--image', imagePath);
+    }
+    args.push(sessionId);
+  } else {
+    for (const imagePath of codexImagePaths) {
+      args.push('--image', imagePath);
+    }
   }
 
   let currentSessionId = sessionId || `codex-pending-${Date.now()}`;
@@ -497,6 +598,8 @@ export async function queryCodex(command, options = {}, ws) {
         session.status = session.status === 'aborted' ? 'aborted' : 'completed';
       }
     }
+
+    await cleanupCodexImageTempDir(codexTempImageDir);
   }
 }
 
