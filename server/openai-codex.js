@@ -188,6 +188,7 @@ function transformCodexEvent(event) {
           return {
             type: 'item',
             itemType: 'command_execution',
+            itemId: item.id || item.call_id || null,
             command: item.command,
             output: item.aggregated_output,
             exitCode: item.exit_code,

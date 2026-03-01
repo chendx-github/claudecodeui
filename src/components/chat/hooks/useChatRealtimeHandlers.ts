@@ -761,6 +761,18 @@ export function useChatRealtimeHandlers({
 
             case 'command_execution':
               if (codexData.command) {
+                const exitCode =
+                  typeof codexData.exitCode === 'number' ? codexData.exitCode : undefined;
+                let outputText = '';
+                if (typeof codexData.output === 'string') {
+                  outputText = codexData.output;
+                } else if (codexData.output !== null && codexData.output !== undefined) {
+                  try {
+                    outputText = JSON.stringify(codexData.output, null, 2);
+                  } catch {
+                    outputText = String(codexData.output);
+                  }
+                }
                 setChatMessages((previous) => [
                   ...previous,
                   {
@@ -769,9 +781,18 @@ export function useChatRealtimeHandlers({
                     timestamp: new Date(),
                     isToolUse: true,
                     toolName: 'Bash',
-                    toolInput: codexData.command,
-                    toolResult: codexData.output || null,
-                    exitCode: codexData.exitCode,
+                    toolInput: { command: codexData.command },
+                    toolResult: outputText
+                      ? {
+                          content: outputText,
+                          isError: exitCode !== undefined ? exitCode !== 0 : false,
+                        }
+                      : null,
+                    toolId:
+                      typeof codexData.itemId === 'string' && codexData.itemId.length > 0
+                        ? codexData.itemId
+                        : undefined,
+                    exitCode,
                   },
                 ]);
               }

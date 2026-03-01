@@ -50,8 +50,14 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
     input: {
       type: 'one-line',
       icon: 'terminal',
-      getValue: (input) => input.command,
-      getSecondary: (input) => input.description,
+      getValue: (input) => {
+        if (typeof input === 'string') return input;
+        return input?.command || '';
+      },
+      getSecondary: (input) => {
+        if (!input || typeof input === 'string') return undefined;
+        return input.description;
+      },
       action: 'copy',
       style: 'terminal',
       wrapText: true,

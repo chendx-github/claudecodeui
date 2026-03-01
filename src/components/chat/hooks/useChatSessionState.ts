@@ -492,9 +492,13 @@ export function useChatSessionState({
 
   useEffect(() => {
     if (sessionMessages.length > 0) {
+      const isCodexSession = selectedSession?.__provider === 'codex';
+      if (isCodexSession && isLoading) {
+        return;
+      }
       setChatMessages(convertedMessages);
     }
-  }, [convertedMessages, sessionMessages.length]);
+  }, [convertedMessages, isLoading, selectedSession?.__provider, sessionMessages.length]);
 
   useEffect(() => {
     if (selectedProject && chatMessages.length > 0) {

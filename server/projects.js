@@ -1669,11 +1669,22 @@ async function getCodexSessionMessages(sessionId, limit = null, offset = 0) {
             let toolInput = entry.payload.arguments;
 
             // Map Codex tool names to Claude equivalents
-            if (toolName === 'shell_command') {
+            if (toolName === 'shell_command' || toolName === 'exec_command') {
               toolName = 'Bash';
               try {
-                const args = JSON.parse(entry.payload.arguments);
-                toolInput = JSON.stringify({ command: args.command });
+                const parsedArgs =
+                  typeof entry.payload.arguments === 'string'
+                    ? JSON.parse(entry.payload.arguments)
+                    : entry.payload.arguments || {};
+                const command =
+                  typeof parsedArgs.command === 'string'
+                    ? parsedArgs.command
+                    : typeof parsedArgs.cmd === 'string'
+                      ? parsedArgs.cmd
+                      : '';
+                if (command) {
+                  toolInput = JSON.stringify({ command });
+                }
               } catch (e) {
                 // Keep original if parsing fails
               }
