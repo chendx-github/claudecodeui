@@ -35,7 +35,6 @@ function ChatInterface({
   autoExpandTools,
   showRawParameters,
   showThinking,
-  showInjectedContext,
   autoScrollToBottom,
   sendByCtrlEnter,
   externalMessageUpdate,
@@ -65,7 +64,8 @@ function ChatInterface({
     setClaudeModel,
     codexModel,
     setCodexModel,
-    codexModelOptions,
+    geminiModel,
+    setGeminiModel,
     permissionMode,
     pendingPermissionRequests,
     setPendingPermissionRequests,
@@ -166,7 +166,6 @@ function ChatInterface({
     handleGrantToolPermission,
     handleInputFocusChange,
     isInputFocused,
-    isCodexConversation,
   } = useChatComposerState({
     selectedProject,
     selectedSession,
@@ -177,12 +176,14 @@ function ChatInterface({
     cursorModel,
     claudeModel,
     codexModel,
+    geminiModel,
     isLoading,
     canAbortSession,
     tokenBudget,
     sendMessage,
     sendByCtrlEnter,
     onSessionActive,
+    onSessionProcessing,
     onInputFocusChange,
     onFileOpen,
     onShowSettings,
@@ -242,13 +243,6 @@ function ChatInterface({
   }, [canAbortSession, handleAbortSession, isLoading]);
 
   useEffect(() => {
-    const processingSessionId = selectedSession?.id || currentSessionId;
-    if (processingSessionId && isLoading && onSessionProcessing) {
-      onSessionProcessing(processingSessionId);
-    }
-  }, [currentSessionId, isLoading, onSessionProcessing, selectedSession?.id]);
-
-  useEffect(() => {
     return () => {
       resetStreamingState();
     };
@@ -260,7 +254,9 @@ function ChatInterface({
         ? t('messageTypes.cursor')
         : provider === 'codex'
           ? t('messageTypes.codex')
-          : t('messageTypes.claude');
+          : provider === 'gemini'
+            ? t('messageTypes.gemini')
+            : t('messageTypes.claude');
 
     return (
       <div className="flex items-center justify-center h-full">
@@ -296,7 +292,8 @@ function ChatInterface({
           setCursorModel={setCursorModel}
           codexModel={codexModel}
           setCodexModel={setCodexModel}
-          codexModelOptions={codexModelOptions}
+          geminiModel={geminiModel}
+          setGeminiModel={setGeminiModel}
           tasksEnabled={tasksEnabled}
           isTaskMasterInstalled={isTaskMasterInstalled}
           onShowAllTasks={onShowAllTasks}
@@ -320,7 +317,6 @@ function ChatInterface({
           autoExpandTools={autoExpandTools}
           showRawParameters={showRawParameters}
           showThinking={showThinking}
-          showInjectedContext={showInjectedContext}
           selectedProject={selectedProject}
           isLoading={isLoading}
         />
@@ -333,7 +329,6 @@ function ChatInterface({
           isLoading={isLoading}
           onAbortSession={handleAbortSession}
           provider={provider}
-          isCodexConversation={isCodexConversation}
           permissionMode={permissionMode}
           onModeSwitch={cyclePermissionMode}
           thinkingMode={thinkingMode}
@@ -386,8 +381,10 @@ function ChatInterface({
               provider === 'cursor'
                 ? t('messageTypes.cursor')
                 : provider === 'codex'
-                ? t('messageTypes.codex')
-                : t('messageTypes.claude'),
+                  ? t('messageTypes.codex')
+                  : provider === 'gemini'
+                    ? t('messageTypes.gemini')
+                    : t('messageTypes.claude'),
           })}
           isTextareaExpanded={isTextareaExpanded}
           sendByCtrlEnter={sendByCtrlEnter}

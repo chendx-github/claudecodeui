@@ -41,12 +41,14 @@ interface UseChatComposerStateArgs {
   cursorModel: string;
   claudeModel: string;
   codexModel: string;
+  geminiModel: string;
   isLoading: boolean;
   canAbortSession: boolean;
   tokenBudget: Record<string, unknown> | null;
   sendMessage: (message: unknown) => void;
   sendByCtrlEnter?: boolean;
   onSessionActive?: (sessionId?: string | null) => void;
+  onSessionProcessing?: (sessionId?: string | null) => void;
   onInputFocusChange?: (focused: boolean) => void;
   onFileOpen?: (filePath: string, diffInfo?: unknown) => void;
   onShowSettings?: () => void;
@@ -92,12 +94,14 @@ export function useChatComposerState({
   cursorModel,
   claudeModel,
   codexModel,
+  geminiModel,
   isLoading,
   canAbortSession,
   tokenBudget,
   sendMessage,
   sendByCtrlEnter,
   onSessionActive,
+  onSessionProcessing,
   onInputFocusChange,
   onFileOpen,
   onShowSettings,
@@ -129,8 +133,6 @@ export function useChatComposerState({
     ((event: FormEvent<HTMLFormElement> | MouseEvent | TouchEvent | KeyboardEvent<HTMLTextAreaElement>) => Promise<void>) | null
   >(null);
   const inputValueRef = useRef(input);
-  const conversationProvider = selectedSession?.__provider ?? provider;
-  const isCodexConversation = conversationProvider === 'codex';
 
   const handleBuiltInCommand = useCallback(
     (result: CommandExecutionResult) => {
@@ -288,13 +290,8 @@ export function useChatComposerState({
           projectPath: selectedProject.fullPath || selectedProject.path,
           projectName: selectedProject.name,
           sessionId: currentSessionId,
-          provider: conversationProvider,
-          model:
-            conversationProvider === 'cursor'
-              ? cursorModel
-              : conversationProvider === 'codex'
-                ? codexModel
-                : claudeModel,
+          provider,
+          model: provider === 'cursor' ? cursorModel : provider === 'codex' ? codexModel : provider === 'gemini' ? geminiModel : claudeModel,
           tokenUsage: tokenBudget,
         };
 
@@ -348,10 +345,11 @@ export function useChatComposerState({
       codexModel,
       currentSessionId,
       cursorModel,
+      geminiModel,
       handleBuiltInCommand,
       handleCustomCommand,
       input,
-      conversationProvider,
+      provider,
       selectedProject,
       setChatMessages,
       tokenBudget,
@@ -472,31 +470,16 @@ export function useChatComposerState({
     noKeyboard: true,
   });
 
-  const [isInputFocused, setIsInputFocused] = useState(false);
-
-  const handleInputFocusChange = useCallback(
-    (focused: boolean) => {
-      setIsInputFocused(focused);
-      onInputFocusChange?.(focused);
-    },
-    [onInputFocusChange],
-  );
-
   const handleSubmit = useCallback(
     async (
       event: FormEvent<HTMLFormElement> | MouseEvent | TouchEvent | KeyboardEvent<HTMLTextAreaElement>,
     ) => {
       event.preventDefault();
       const currentInput = inputValueRef.current;
-      const shouldBlockSubmit = isLoading && !isCodexConversation;
-      if (!currentInput.trim() || shouldBlockSubmit || !selectedProject) {
+      if (!currentInput.trim() || isLoading || !selectedProject) {
         return;
       }
 
-      // Mobile browsers can miss blur/focus updates when Enter submits and textarea
-      // gets disabled while streaming; force-sync focus state to restore bottom UI.
-      textareaRef.current?.blur();
-      handleInputFocusChange(false);
       // Intercept slash commands: if input starts with /commandName, execute as command with args
       const trimmedInput = currentInput.trim();
       if (trimmedInput.startsWith('/')) {
@@ -524,27 +507,6 @@ export function useChatComposerState({
       if (selectedThinkingMode && selectedThinkingMode.prefix) {
         messageContent = `${selectedThinkingMode.prefix}: ${currentInput}`;
       }
-
-      // Resolve session target before any async work (e.g. image upload) to avoid
-      // races where session state changes mid-submit and incorrectly starts a new session.
-      const pendingSessionId =
-        typeof window !== 'undefined' ? sessionStorage.getItem('pendingSessionId') : null;
-      const cursorSessionId =
-        typeof window !== 'undefined' ? sessionStorage.getItem('cursorSessionId') : null;
-      const providerPendingSessionId = isCodexConversation
-        ? pendingSessionId
-        : conversationProvider === 'cursor'
-          ? cursorSessionId
-          : null;
-      const stableCurrentSessionId = isTemporarySessionId(currentSessionId) ? null : currentSessionId;
-      const stableSelectedSessionId = isTemporarySessionId(selectedSession?.id)
-        ? null
-        : selectedSession?.id || null;
-      // Prefer concrete active/selected sessions. Pending IDs are only a fallback
-      // for in-flight temporary sessions to avoid cross-session routing.
-      const effectiveSessionId =
-        stableCurrentSessionId || stableSelectedSessionId || providerPendingSessionId;
-      const sessionToActivate = effectiveSessionId || `new-session-${Date.now()}`;
 
       let uploadedImages: unknown[] = [];
       if (attachedImages.length > 0) {
@@ -600,7 +562,11 @@ export function useChatComposerState({
       setIsUserScrolledUp(false);
       setTimeout(() => scrollToBottom(), 100);
 
-      if (!effectiveSessionId && !stableSelectedSessionId) {
+      const effectiveSessionId =
+        currentSessionId || selectedSession?.id || sessionStorage.getItem('cursorSessionId');
+      const sessionToActivate = effectiveSessionId || `new-session-${Date.now()}`;
+
+      if (!effectiveSessionId && !selectedSession?.id) {
         if (typeof window !== 'undefined') {
           // Reset stale pending IDs from previous interrupted runs before creating a new one.
           sessionStorage.removeItem('pendingSessionId');
@@ -608,15 +574,20 @@ export function useChatComposerState({
         pendingViewSessionRef.current = { sessionId: null, startedAt: Date.now() };
       }
       onSessionActive?.(sessionToActivate);
+      if (effectiveSessionId && !isTemporarySessionId(effectiveSessionId)) {
+        onSessionProcessing?.(effectiveSessionId);
+      }
 
       const getToolsSettings = () => {
         try {
           const settingsKey =
-            conversationProvider === 'cursor'
+            provider === 'cursor'
               ? 'cursor-tools-settings'
-              : conversationProvider === 'codex'
-              ? 'codex-settings'
-              : 'claude-settings';
+              : provider === 'codex'
+                ? 'codex-settings'
+                : provider === 'gemini'
+                  ? 'gemini-settings'
+                  : 'claude-settings';
           const savedSettings = safeLocalStorage.getItem(settingsKey);
           if (savedSettings) {
             return JSON.parse(savedSettings);
@@ -635,7 +606,7 @@ export function useChatComposerState({
       const toolsSettings = getToolsSettings();
       const resolvedProjectPath = selectedProject.fullPath || selectedProject.path || '';
 
-      if (conversationProvider === 'cursor') {
+      if (provider === 'cursor') {
         sendMessage({
           type: 'cursor-command',
           command: messageContent,
@@ -650,7 +621,7 @@ export function useChatComposerState({
             toolsSettings,
           },
         });
-      } else if (isCodexConversation) {
+      } else if (provider === 'codex') {
         sendMessage({
           type: 'codex-command',
           command: messageContent,
@@ -662,7 +633,21 @@ export function useChatComposerState({
             resume: Boolean(effectiveSessionId),
             model: codexModel,
             permissionMode: permissionMode === 'plan' ? 'default' : permissionMode,
-            images: uploadedImages,
+          },
+        });
+      } else if (provider === 'gemini') {
+        sendMessage({
+          type: 'gemini-command',
+          command: messageContent,
+          sessionId: effectiveSessionId,
+          options: {
+            cwd: resolvedProjectPath,
+            projectPath: resolvedProjectPath,
+            sessionId: effectiveSessionId,
+            resume: Boolean(effectiveSessionId),
+            model: geminiModel,
+            permissionMode,
+            toolsSettings,
           },
         });
       } else {
@@ -703,19 +688,18 @@ export function useChatComposerState({
       codexModel,
       currentSessionId,
       cursorModel,
-      handleInputFocusChange,
       executeCommand,
-      conversationProvider,
-      isCodexConversation,
+      geminiModel,
       isLoading,
       onSessionActive,
+      onSessionProcessing,
       pendingViewSessionRef,
       permissionMode,
+      provider,
       resetCommandMenuState,
       scrollToBottom,
       selectedProject,
       selectedSession?.id,
-      selectedSession?.__provider,
       sendMessage,
       setCanAbortSession,
       setChatMessages,
@@ -877,7 +861,6 @@ export function useChatComposerState({
       return;
     }
 
-    const abortProvider = selectedSession?.__provider ?? provider;
     const pendingSessionId =
       typeof window !== 'undefined' ? sessionStorage.getItem('pendingSessionId') : null;
     const cursorSessionId =
@@ -886,9 +869,9 @@ export function useChatComposerState({
     const candidateSessionIds = [
       currentSessionId,
       pendingViewSessionRef.current?.sessionId || null,
-      selectedSession?.id || null,
-      abortProvider === 'cursor' ? cursorSessionId : null,
       pendingSessionId,
+      provider === 'cursor' ? cursorSessionId : null,
+      selectedSession?.id || null,
     ];
 
     const targetSessionId =
@@ -902,17 +885,9 @@ export function useChatComposerState({
     sendMessage({
       type: 'abort-session',
       sessionId: targetSessionId,
-      provider: abortProvider,
+      provider,
     });
-  }, [
-    canAbortSession,
-    currentSessionId,
-    pendingViewSessionRef,
-    provider,
-    selectedSession?.id,
-    selectedSession?.__provider,
-    sendMessage,
-  ]);
+  }, [canAbortSession, currentSessionId, pendingViewSessionRef, provider, selectedSession?.id, sendMessage]);
 
   const handleTranscript = useCallback((text: string) => {
     if (!text.trim()) {
@@ -981,44 +956,15 @@ export function useChatComposerState({
     [sendMessage, setClaudeStatus, setPendingPermissionRequests],
   );
 
-  useEffect(() => {
-    const isCodexConversation =
-      provider === 'codex' || selectedSession?.__provider === 'codex';
-    if (!isLoading || !isInputFocused || isCodexConversation) {
-      return;
-    }
+  const [isInputFocused, setIsInputFocused] = useState(false);
 
-    handleInputFocusChange(false);
-  }, [handleInputFocusChange, isInputFocused, isLoading, provider, selectedSession?.__provider]);
-
-  useEffect(() => {
-    if (!isInputFocused || typeof window === 'undefined') {
-      return;
-    }
-
-    const viewport = window.visualViewport;
-    if (!viewport) {
-      return;
-    }
-
-    const baselineViewportHeight = viewport.height;
-    const KEYBOARD_CLOSE_THRESHOLD_PX = 60;
-
-    const handleViewportChange = () => {
-      if (viewport.height >= baselineViewportHeight + KEYBOARD_CLOSE_THRESHOLD_PX) {
-        setIsInputFocused(false);
-        onInputFocusChange?.(false);
-      }
-    };
-
-    viewport.addEventListener('resize', handleViewportChange);
-    viewport.addEventListener('scroll', handleViewportChange);
-
-    return () => {
-      viewport.removeEventListener('resize', handleViewportChange);
-      viewport.removeEventListener('scroll', handleViewportChange);
-    };
-  }, [isInputFocused, onInputFocusChange]);
+  const handleInputFocusChange = useCallback(
+    (focused: boolean) => {
+      setIsInputFocused(focused);
+      onInputFocusChange?.(focused);
+    },
+    [onInputFocusChange],
+  );
 
   return {
     input,
@@ -1064,6 +1010,5 @@ export function useChatComposerState({
     handleGrantToolPermission,
     handleInputFocusChange,
     isInputFocused,
-    isCodexConversation,
   };
 }

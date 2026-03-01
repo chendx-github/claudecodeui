@@ -1,9 +1,9 @@
 import React from 'react';
 import { Check, ChevronDown } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import SessionProviderLogo from '../../../SessionProviderLogo';
+import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';
 import NextTaskBanner from '../../../NextTaskBanner.jsx';
-import { CLAUDE_MODELS, CURSOR_MODELS, CODEX_MODELS } from '../../../../../shared/modelConstants';
+import { CLAUDE_MODELS, CURSOR_MODELS, CODEX_MODELS, GEMINI_MODELS } from '../../../../../shared/modelConstants';
 import type { ProjectSession, SessionProvider } from '../../../../types/app';
 
 interface ProviderSelectionEmptyStateProps {
@@ -18,7 +18,8 @@ interface ProviderSelectionEmptyStateProps {
   setCursorModel: (model: string) => void;
   codexModel: string;
   setCodexModel: (model: string) => void;
-  codexModelOptions: Array<{ value: string; label: string }>;
+  geminiModel: string;
+  setGeminiModel: (model: string) => void;
   tasksEnabled: boolean;
   isTaskMasterInstalled: boolean | null;
   onShowAllTasks?: (() => void) | null;
@@ -59,17 +60,27 @@ const PROVIDERS: ProviderDef[] = [
     ring: 'ring-emerald-600/15',
     check: 'bg-emerald-600 dark:bg-emerald-500 text-white',
   },
+  {
+    id: 'gemini',
+    name: 'Gemini',
+    infoKey: 'providerSelection.providerInfo.google',
+    accent: 'border-blue-500 dark:border-blue-400',
+    ring: 'ring-blue-500/15',
+    check: 'bg-blue-500 text-white',
+  },
 ];
 
 function getModelConfig(p: SessionProvider) {
   if (p === 'claude') return CLAUDE_MODELS;
   if (p === 'codex') return CODEX_MODELS;
+  if (p === 'gemini') return GEMINI_MODELS;
   return CURSOR_MODELS;
 }
 
-function getModelValue(p: SessionProvider, c: string, cu: string, co: string) {
+function getModelValue(p: SessionProvider, c: string, cu: string, co: string, g: string) {
   if (p === 'claude') return c;
   if (p === 'codex') return co;
+  if (p === 'gemini') return g;
   return cu;
 }
 
@@ -85,7 +96,8 @@ export default function ProviderSelectionEmptyState({
   setCursorModel,
   codexModel,
   setCodexModel,
-  codexModelOptions,
+  geminiModel,
+  setGeminiModel,
   tasksEnabled,
   isTaskMasterInstalled,
   onShowAllTasks,
@@ -93,10 +105,6 @@ export default function ProviderSelectionEmptyState({
 }: ProviderSelectionEmptyStateProps) {
   const { t } = useTranslation('chat');
   const nextTaskPrompt = t('tasks.nextTaskPrompt', { defaultValue: 'Start the next task' });
-  const customCodexOptionValue = '__custom_codex_model__';
-  const codexSelectValue = codexModelOptions.some(({ value }) => value === codexModel)
-    ? codexModel
-    : customCodexOptionValue;
 
   const selectProvider = (next: SessionProvider) => {
     setProvider(next);
@@ -105,26 +113,21 @@ export default function ProviderSelectionEmptyState({
   };
 
   const handleModelChange = (value: string) => {
-    if (provider === 'claude') {
-      setClaudeModel(value);
-      localStorage.setItem('claude-model', value);
-      return;
-    }
-
-    if (provider === 'cursor') {
-      setCursorModel(value);
-      localStorage.setItem('cursor-model', value);
-    }
+    if (provider === 'claude') { setClaudeModel(value); localStorage.setItem('claude-model', value); }
+    else if (provider === 'codex') { setCodexModel(value); localStorage.setItem('codex-model', value); }
+    else if (provider === 'gemini') { setGeminiModel(value); localStorage.setItem('gemini-model', value); }
+    else { setCursorModel(value); localStorage.setItem('cursor-model', value); }
   };
 
   const modelConfig = getModelConfig(provider);
-  const currentModel = getModelValue(provider, claudeModel, cursorModel, codexModel);
+  const currentModel = getModelValue(provider, claudeModel, cursorModel, codexModel, geminiModel);
 
-  // New session provider picker.
+  /* ── New session — provider picker ── */
   if (!selectedSession && !currentSessionId) {
     return (
       <div className="flex items-center justify-center h-full px-4">
         <div className="w-full max-w-md">
+          {/* Heading */}
           <div className="text-center mb-8">
             <h2 className="text-lg sm:text-xl font-semibold text-foreground tracking-tight">
               {t('providerSelection.title')}
@@ -134,7 +137,8 @@ export default function ProviderSelectionEmptyState({
             </p>
           </div>
 
-          <div className="grid grid-cols-3 gap-2 sm:gap-2.5 mb-6">
+          {/* Provider cards — horizontal row, equal width */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-2.5 mb-6">
             {PROVIDERS.map((p) => {
               const active = provider === p.id;
               return (
@@ -159,6 +163,7 @@ export default function ProviderSelectionEmptyState({
                     <p className="text-[13px] font-semibold text-foreground leading-none">{p.name}</p>
                     <p className="text-[10px] text-muted-foreground mt-1 leading-tight">{t(p.infoKey)}</p>
                   </div>
+                  {/* Check badge */}
                   {active && (
                     <div className={`absolute -top-1 -right-1 w-[18px] h-[18px] rounded-full ${p.check} flex items-center justify-center shadow-sm`}>
                       <Check className="w-2.5 h-2.5" strokeWidth={3} />
@@ -169,79 +174,38 @@ export default function ProviderSelectionEmptyState({
             })}
           </div>
 
+          {/* Model picker — appears after provider is chosen */}
           <div className={`transition-all duration-200 ${provider ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1 pointer-events-none'}`}>
-            <div className="flex flex-col items-center gap-2 mb-5">
+            <div className="flex items-center justify-center gap-2 mb-5">
               <span className="text-sm text-muted-foreground">{t('providerSelection.selectModel')}</span>
-
-              {provider === 'codex' ? (
-                <>
-                  <div className="relative w-full max-w-xs">
-                    <select
-                      value={codexSelectValue}
-                      onChange={(e) => {
-                        const selectedModel = e.target.value;
-                        if (selectedModel === customCodexOptionValue) {
-                          return;
-                        }
-                        setCodexModel(selectedModel);
-                        localStorage.setItem('codex-model', selectedModel);
-                      }}
-                      className="appearance-none w-full pl-3 pr-7 py-1.5 text-sm font-medium bg-muted/50 border border-border/60 rounded-lg text-foreground cursor-pointer hover:bg-muted transition-colors focus:outline-none focus:ring-2 focus:ring-primary/20"
-                    >
-                      {codexModelOptions.map(({ value, label }) => (
-                        <option key={value} value={value}>{label}</option>
-                      ))}
-                      <option value={customCodexOptionValue}>
-                        {t('providerSelection.customCodexModel', { defaultValue: 'Custom model (edit below)' })}
-                      </option>
-                    </select>
-                    <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
-                  </div>
-                  <input
-                    type="text"
-                    value={codexModel}
-                    onChange={(e) => {
-                      const newModel = e.target.value.trim();
-                      setCodexModel(newModel);
-                      if (newModel) {
-                        localStorage.setItem('codex-model', newModel);
-                      } else {
-                        localStorage.removeItem('codex-model');
-                      }
-                    }}
-                    placeholder={CODEX_MODELS.DEFAULT}
-                    autoComplete="off"
-                    className="w-full max-w-xs pl-3 pr-3 py-1.5 text-sm font-medium bg-muted/50 border border-border/60 rounded-lg text-foreground hover:bg-muted transition-colors focus:outline-none focus:ring-2 focus:ring-primary/20"
-                  />
-                </>
-              ) : (
-                <div className="relative w-full max-w-xs">
-                  <select
-                    value={currentModel}
-                    onChange={(e) => handleModelChange(e.target.value)}
-                    tabIndex={-1}
-                    className="appearance-none w-full pl-3 pr-7 py-1.5 text-sm font-medium bg-muted/50 border border-border/60 rounded-lg text-foreground cursor-pointer hover:bg-muted transition-colors focus:outline-none focus:ring-2 focus:ring-primary/20"
-                  >
-                    {modelConfig.OPTIONS.map(({ value, label }: { value: string; label: string }) => (
-                      <option key={value} value={value}>{label}</option>
-                    ))}
-                  </select>
-                  <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
-                </div>
-              )}
+              <div className="relative">
+                <select
+                  value={currentModel}
+                  onChange={(e) => handleModelChange(e.target.value)}
+                  tabIndex={-1}
+                  className="appearance-none pl-3 pr-7 py-1.5 text-sm font-medium bg-muted/50 border border-border/60 rounded-lg text-foreground cursor-pointer hover:bg-muted transition-colors focus:outline-none focus:ring-2 focus:ring-primary/20"
+                >
+                  {modelConfig.OPTIONS.map(({ value, label }: { value: string; label: string }) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+                <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+              </div>
             </div>
 
             <p className="text-center text-sm text-muted-foreground/70">
-              {provider === 'claude'
-                ? t('providerSelection.readyPrompt.claude', { model: claudeModel })
-                : provider === 'cursor'
-                  ? t('providerSelection.readyPrompt.cursor', { model: cursorModel })
-                  : provider === 'codex'
-                    ? t('providerSelection.readyPrompt.codex', { model: codexModel })
-                    : t('providerSelection.readyPrompt.default')}
+              {
+                {
+                  claude: t('providerSelection.readyPrompt.claude', { model: claudeModel }),
+                  cursor: t('providerSelection.readyPrompt.cursor', { model: cursorModel }),
+                  codex: t('providerSelection.readyPrompt.codex', { model: codexModel }),
+                  gemini: t('providerSelection.readyPrompt.gemini', { model: geminiModel }),
+                }[provider]
+              }
             </p>
           </div>
 
+          {/* Task banner */}
           {provider && tasksEnabled && isTaskMasterInstalled && (
             <div className="mt-5">
               <NextTaskBanner onStartTask={() => setInput(nextTaskPrompt)} onShowAllTasks={onShowAllTasks} />
@@ -252,7 +216,7 @@ export default function ProviderSelectionEmptyState({
     );
   }
 
-  // Existing session continue prompt.
+  /* ── Existing session — continue prompt ── */
   if (selectedSession) {
     return (
       <div className="flex items-center justify-center h-full">
