@@ -20,6 +20,7 @@ import type {
   ChatMessage,
   PendingPermissionRequest,
   PermissionMode,
+  TokenBudget,
 } from '../types/types';
 import { useFileMentions } from './useFileMentions';
 import { type SlashCommand, useSlashCommands } from './useSlashCommands';
@@ -41,10 +42,11 @@ interface UseChatComposerStateArgs {
   cursorModel: string;
   claudeModel: string;
   codexModel: string;
+  codexReasoningEffort: string;
   geminiModel: string;
   isLoading: boolean;
   canAbortSession: boolean;
-  tokenBudget: Record<string, unknown> | null;
+  tokenBudget: TokenBudget | null;
   sendMessage: (message: unknown) => void;
   sendByCtrlEnter?: boolean;
   onSessionActive?: (sessionId?: string | null) => void;
@@ -94,6 +96,7 @@ export function useChatComposerState({
   cursorModel,
   claudeModel,
   codexModel,
+  codexReasoningEffort,
   geminiModel,
   isLoading,
   canAbortSession,
@@ -632,6 +635,7 @@ export function useChatComposerState({
             sessionId: effectiveSessionId,
             resume: Boolean(effectiveSessionId),
             model: codexModel,
+            reasoningEffort: codexReasoningEffort,
             permissionMode: permissionMode === 'plan' ? 'default' : permissionMode,
           },
         });
@@ -686,6 +690,7 @@ export function useChatComposerState({
       attachedImages,
       claudeModel,
       codexModel,
+      codexReasoningEffort,
       currentSessionId,
       cursorModel,
       executeCommand,

@@ -67,6 +67,20 @@ export const CODEX_MODELS = {
 };
 
 /**
+ * Codex reasoning effort levels.
+ */
+export const CODEX_REASONING_LEVELS = {
+  OPTIONS: [
+    { value: 'low', label: 'Low' },
+    { value: 'medium', label: 'Medium' },
+    { value: 'high', label: 'High' },
+    { value: 'xhigh', label: 'Extra High' },
+  ],
+
+  DEFAULT: 'medium',
+};
+
+/**
  * Gemini Models
  */
 export const GEMINI_MODELS = {

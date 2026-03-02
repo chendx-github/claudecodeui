@@ -139,16 +139,27 @@ export function useShellConnection({
 
             currentFitAddon.fit();
 
+            const selectedProvider = isPlainShellRef.current
+              ? 'plain-shell'
+              : (selectedSessionRef.current?.__provider || localStorage.getItem('selected-provider') || 'claude');
+            const isCodexShell = selectedProvider === 'codex';
+            const shellModel = isCodexShell ? (localStorage.getItem('shell-codex-model') || '').trim() : '';
+            const shellReasoningEffort = isCodexShell ? (localStorage.getItem('shell-codex-reasoning') || '').trim() : '';
+            const shellExtraArgs = isCodexShell ? (localStorage.getItem('shell-codex-extra-args') || '').trim() : '';
+
             sendSocketMessage(socket, {
               type: 'init',
               projectPath: currentProject.fullPath || currentProject.path || '',
               sessionId: isPlainShellRef.current ? null : selectedSessionRef.current?.id || null,
               hasSession: isPlainShellRef.current ? false : Boolean(selectedSessionRef.current),
-              provider: isPlainShellRef.current ? 'plain-shell' : (selectedSessionRef.current?.__provider || localStorage.getItem('selected-provider') || 'claude'),
+              provider: selectedProvider,
               cols: currentTerminal.cols,
               rows: currentTerminal.rows,
               initialCommand: initialCommandRef.current,
               isPlainShell: isPlainShellRef.current,
+              shellModel: shellModel || undefined,
+              shellReasoningEffort: shellReasoningEffort || undefined,
+              shellExtraArgs: shellExtraArgs || undefined,
             });
           }, TERMINAL_INIT_DELAY_MS);
         };

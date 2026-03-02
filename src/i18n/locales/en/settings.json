@@ -55,6 +55,7 @@
       "appearance": "Appearance",
       "toolDisplay": "Tool Display",
       "viewOptions": "View Options",
+      "shellLaunch": "Shell Launch",
       "inputSettings": "Input Settings",
       "whisperDictation": "Whisper Dictation"
     },
@@ -65,8 +66,17 @@
     "showInjectedContext": "Show injected AGENTS context",
     "autoScrollToBottom": "Auto-scroll to bottom",
     "showIgnoredDirectories": "Show ignored directories in Files",
+    "autoDiscoverCodexProjects": "Auto-discover Codex-only projects",
     "sendByCtrlEnter": "Send by Ctrl+Enter",
     "sendByCtrlEnterDescription": "When enabled, pressing Ctrl+Enter will send the message instead of just Enter. This is useful for IME users to avoid accidental sends.",
+    "shell": {
+      "codexModel": "Codex model",
+      "useSessionDefault": "Use session/default model",
+      "reasoningLevel": "Reasoning level",
+      "extraArgs": "Extra launch args",
+      "extraArgsPlaceholder": "Example: --search --approval-mode never",
+      "appliesOnReconnect": "Applied the next time Shell connects/reconnects to Codex."
+    },
     "dragHandle": {
       "dragging": "Dragging handle",
       "closePanel": "Close settings panel",

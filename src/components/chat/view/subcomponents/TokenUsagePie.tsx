@@ -1,6 +1,6 @@
 type TokenUsagePieProps = {
-  used: number;
-  total: number;
+  used: number | null;
+  total: number | null;
 };
 
 export default function TokenUsagePie({ used, total }: TokenUsagePieProps) {

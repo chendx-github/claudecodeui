@@ -2,15 +2,21 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import ThinkingModeSelector from './ThinkingModeSelector';
 import TokenUsagePie from './TokenUsagePie';
-import type { PermissionMode, Provider } from '../../types/types';
+import type { PermissionMode, Provider, TokenBudget } from '../../types/types';
 
 interface ChatInputControlsProps {
   permissionMode: PermissionMode | string;
   onModeSwitch: () => void;
   provider: Provider | string;
+  currentModel: string;
+  modelOptions: Array<{ value: string; label: string }>;
+  onModelChange: (model: string) => void;
+  currentReasoningEffort?: string;
+  reasoningOptions?: Array<{ value: string; label: string }>;
+  onReasoningChange?: (effort: string) => void;
   thinkingMode: string;
   setThinkingMode: React.Dispatch<React.SetStateAction<string>>;
-  tokenBudget: { used?: number; total?: number } | null;
+  tokenBudget: TokenBudget | null;
   slashCommandsCount: number;
   onToggleCommandMenu: () => void;
   hasInput: boolean;
@@ -24,6 +30,12 @@ export default function ChatInputControls({
   permissionMode,
   onModeSwitch,
   provider,
+  currentModel,
+  modelOptions,
+  onModelChange,
+  currentReasoningEffort,
+  reasoningOptions = [],
+  onReasoningChange,
   thinkingMode,
   setThinkingMode,
   tokenBudget,
@@ -74,11 +86,52 @@ export default function ChatInputControls({
         </div>
       </button>
 
+      <div className="flex items-center gap-2 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg border border-border/60 bg-muted/40">
+        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          {t('input.model', { defaultValue: 'Model' })}
+        </span>
+        <select
+          value={currentModel}
+          onChange={(event) => onModelChange(event.target.value)}
+          className="bg-transparent text-sm font-medium text-foreground focus:outline-none min-w-[7rem]"
+          title={t('input.changeModel', { defaultValue: 'Change model for next turn' })}
+        >
+          {modelOptions.map(({ value, label }) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {provider === 'codex' && currentReasoningEffort && onReasoningChange && reasoningOptions.length > 0 && (
+        <div className="flex items-center gap-2 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg border border-border/60 bg-muted/40">
+          <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            {t('providerSelection.selectReasoning', { defaultValue: 'Reasoning' })}
+          </span>
+          <select
+            value={currentReasoningEffort}
+            onChange={(event) => onReasoningChange(event.target.value)}
+            className="bg-transparent text-sm font-medium text-foreground focus:outline-none min-w-[7rem]"
+            title={t('providerSelection.selectReasoning', { defaultValue: 'Reasoning level' })}
+          >
+            {reasoningOptions.map(({ value, label }) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
       {provider === 'claude' && (
         <ThinkingModeSelector selectedMode={thinkingMode} onModeChange={setThinkingMode} onClose={() => {}} className="" />
       )}
 
-      <TokenUsagePie used={tokenBudget?.used || 0} total={tokenBudget?.total || parseInt(import.meta.env.VITE_CONTEXT_WINDOW) || 160000} />
+      <TokenUsagePie
+        used={typeof tokenBudget?.used === 'number' ? tokenBudget.used : null}
+        total={typeof tokenBudget?.total === 'number' ? tokenBudget.total : null}
+      />
 
       <button
         type="button"

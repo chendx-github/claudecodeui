@@ -3,7 +3,13 @@ import { Check, ChevronDown } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import SessionProviderLogo from '../../../llm-logo-provider/SessionProviderLogo';
 import NextTaskBanner from '../../../NextTaskBanner.jsx';
-import { CLAUDE_MODELS, CURSOR_MODELS, CODEX_MODELS, GEMINI_MODELS } from '../../../../../shared/modelConstants';
+import {
+  CLAUDE_MODELS,
+  CURSOR_MODELS,
+  CODEX_MODELS,
+  CODEX_REASONING_LEVELS,
+  GEMINI_MODELS,
+} from '../../../../../shared/modelConstants';
 import type { ProjectSession, SessionProvider } from '../../../../types/app';
 
 interface ProviderSelectionEmptyStateProps {
@@ -18,6 +24,9 @@ interface ProviderSelectionEmptyStateProps {
   setCursorModel: (model: string) => void;
   codexModel: string;
   setCodexModel: (model: string) => void;
+  codexModelOptions: Array<{ value: string; label: string }>;
+  codexReasoningEffort: string;
+  setCodexReasoningEffort: (effort: string) => void;
   geminiModel: string;
   setGeminiModel: (model: string) => void;
   tasksEnabled: boolean;
@@ -96,6 +105,9 @@ export default function ProviderSelectionEmptyState({
   setCursorModel,
   codexModel,
   setCodexModel,
+  codexModelOptions,
+  codexReasoningEffort,
+  setCodexReasoningEffort,
   geminiModel,
   setGeminiModel,
   tasksEnabled,
@@ -121,6 +133,12 @@ export default function ProviderSelectionEmptyState({
 
   const modelConfig = getModelConfig(provider);
   const currentModel = getModelValue(provider, claudeModel, cursorModel, codexModel, geminiModel);
+  const resolvedModelOptions = provider === 'codex' ? codexModelOptions : modelConfig.OPTIONS;
+  const codexReasoningOptions =
+    codexReasoningEffort &&
+    !CODEX_REASONING_LEVELS.OPTIONS.some(({ value }) => value === codexReasoningEffort)
+      ? [{ value: codexReasoningEffort, label: codexReasoningEffort }, ...CODEX_REASONING_LEVELS.OPTIONS]
+      : CODEX_REASONING_LEVELS.OPTIONS;
 
   /* ── New session — provider picker ── */
   if (!selectedSession && !currentSessionId) {
@@ -185,13 +203,40 @@ export default function ProviderSelectionEmptyState({
                   tabIndex={-1}
                   className="appearance-none pl-3 pr-7 py-1.5 text-sm font-medium bg-muted/50 border border-border/60 rounded-lg text-foreground cursor-pointer hover:bg-muted transition-colors focus:outline-none focus:ring-2 focus:ring-primary/20"
                 >
-                  {modelConfig.OPTIONS.map(({ value, label }: { value: string; label: string }) => (
+                  {resolvedModelOptions.map(({ value, label }: { value: string; label: string }) => (
                     <option key={value} value={value}>{label}</option>
                   ))}
                 </select>
                 <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
               </div>
             </div>
+
+            {provider === 'codex' && (
+              <div className="flex items-center justify-center gap-2 mb-5">
+                <span className="text-sm text-muted-foreground">
+                  {t('providerSelection.selectReasoning', { defaultValue: 'Reasoning level' })}
+                </span>
+                <div className="relative">
+                  <select
+                    value={codexReasoningEffort}
+                    onChange={(event) => {
+                      const nextValue = event.target.value;
+                      setCodexReasoningEffort(nextValue);
+                      localStorage.setItem('codex-reasoning-effort', nextValue);
+                    }}
+                    tabIndex={-1}
+                    className="appearance-none pl-3 pr-7 py-1.5 text-sm font-medium bg-muted/50 border border-border/60 rounded-lg text-foreground cursor-pointer hover:bg-muted transition-colors focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  >
+                    {codexReasoningOptions.map(({ value, label }: { value: string; label: string }) => (
+                      <option key={value} value={value}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+                </div>
+              </div>
+            )}
 
             <p className="text-center text-sm text-muted-foreground/70">
               {

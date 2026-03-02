@@ -1,5 +1,6 @@
 import express from 'express';
 import { apiKeysDb, credentialsDb } from '../database/db.js';
+import { loadUiSettings, updateUiSettings } from '../ui-settings.js';
 
 const router = express.Router();
 
@@ -172,6 +173,43 @@ router.patch('/credentials/:credentialId/toggle', async (req, res) => {
   } catch (error) {
     console.error('Error toggling credential:', error);
     res.status(500).json({ error: 'Failed to toggle credential' });
+  }
+});
+
+// ===============================
+// UI Preferences
+// ===============================
+
+router.get('/ui-preferences', async (req, res) => {
+  try {
+    const preferences = await loadUiSettings();
+    res.json({
+      success: true,
+      preferences,
+    });
+  } catch (error) {
+    console.error('Error fetching UI preferences:', error);
+    res.status(500).json({ error: 'Failed to fetch UI preferences' });
+  }
+});
+
+router.patch('/ui-preferences', async (req, res) => {
+  try {
+    const { codexAutoDiscoverProjects } = req.body || {};
+    if (typeof codexAutoDiscoverProjects !== 'boolean') {
+      return res.status(400).json({
+        error: 'codexAutoDiscoverProjects must be a boolean',
+      });
+    }
+
+    const preferences = await updateUiSettings({ codexAutoDiscoverProjects });
+    res.json({
+      success: true,
+      preferences,
+    });
+  } catch (error) {
+    console.error('Error updating UI preferences:', error);
+    res.status(500).json({ error: 'Failed to update UI preferences' });
   }
 });
 

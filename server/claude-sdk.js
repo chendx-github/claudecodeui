@@ -260,6 +260,39 @@ function transformMessage(sdkMessage) {
   return sdkMessage;
 }
 
+const toFiniteNumber = (value) => {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const getConfiguredContextWindow = () => {
+  const parsedContextWindow = parseInt(process.env.CONTEXT_WINDOW, 10);
+  return Number.isFinite(parsedContextWindow) && parsedContextWindow > 0
+    ? parsedContextWindow
+    : 160000;
+};
+
+const readContextWindowFromModelUsage = (modelData, resultMessage) => {
+  const candidates = [
+    modelData?.modelContextWindow,
+    modelData?.contextWindow,
+    modelData?.contextWindowTokens,
+    modelData?.maxContextTokens,
+    modelData?.maxInputTokens,
+    resultMessage?.model_context_window,
+    resultMessage?.contextWindow,
+  ];
+
+  for (const candidate of candidates) {
+    const numericValue = toFiniteNumber(candidate);
+    if (numericValue > 0) {
+      return numericValue;
+    }
+  }
+
+  return getConfiguredContextWindow();
+};
+
 /**
  * Extracts token usage from SDK result messages
  * @param {Object} resultMessage - SDK result message
@@ -278,25 +311,47 @@ function extractTokenBudget(resultMessage) {
     return null;
   }
 
-  // Use cumulative tokens if available (tracks total for the session)
-  // Otherwise fall back to per-request tokens
-  const inputTokens = modelData.cumulativeInputTokens || modelData.inputTokens || 0;
-  const outputTokens = modelData.cumulativeOutputTokens || modelData.outputTokens || 0;
-  const cacheReadTokens = modelData.cumulativeCacheReadInputTokens || modelData.cacheReadInputTokens || 0;
-  const cacheCreationTokens = modelData.cumulativeCacheCreationInputTokens || modelData.cacheCreationInputTokens || 0;
+  const hasPerTurnUsage =
+    modelData.inputTokens !== undefined ||
+    modelData.outputTokens !== undefined ||
+    modelData.cacheReadInputTokens !== undefined ||
+    modelData.cacheCreationInputTokens !== undefined;
 
-  // Total used = input + output + cache tokens
-  const totalUsed = inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens;
+  const inputTokens = hasPerTurnUsage
+    ? toFiniteNumber(modelData.inputTokens)
+    : toFiniteNumber(modelData.cumulativeInputTokens);
+  const outputTokens = hasPerTurnUsage
+    ? toFiniteNumber(modelData.outputTokens)
+    : toFiniteNumber(modelData.cumulativeOutputTokens);
+  const cacheReadTokens = hasPerTurnUsage
+    ? toFiniteNumber(modelData.cacheReadInputTokens)
+    : toFiniteNumber(modelData.cumulativeCacheReadInputTokens);
+  const cacheCreationTokens = hasPerTurnUsage
+    ? toFiniteNumber(modelData.cacheCreationInputTokens)
+    : toFiniteNumber(modelData.cumulativeCacheCreationInputTokens);
 
-  // Use configured context window budget from environment (default 160000)
-  // This is the user's budget limit, not the model's context window
-  const contextWindow = parseInt(process.env.CONTEXT_WINDOW) || 160000;
+  // Current context occupancy should track the input side only.
+  const contextUsed = inputTokens + cacheReadTokens + cacheCreationTokens;
+  const lifetimeUsed = contextUsed + outputTokens;
+  const contextWindow = readContextWindowFromModelUsage(modelData, resultMessage);
+  const metricType = hasPerTurnUsage ? 'current_context_usage' : 'lifetime_tokens';
 
-  console.log(`Token calculation: input=${inputTokens}, output=${outputTokens}, cache=${cacheReadTokens + cacheCreationTokens}, total=${totalUsed}/${contextWindow}`);
+  console.log(
+    `Token calculation (${metricType}): input=${inputTokens}, output=${outputTokens}, cache=${cacheReadTokens + cacheCreationTokens}, used=${hasPerTurnUsage ? contextUsed : lifetimeUsed}/${contextWindow}`,
+  );
 
   return {
-    used: totalUsed,
-    total: contextWindow
+    used: hasPerTurnUsage ? contextUsed : lifetimeUsed,
+    total: contextWindow,
+    metricType,
+    source: 'claude',
+    observedAt: new Date().toISOString(),
+    breakdown: {
+      input: inputTokens,
+      output: outputTokens,
+      cacheRead: cacheReadTokens,
+      cacheCreation: cacheCreationTokens,
+    },
   };
 }
 

@@ -66,6 +66,7 @@ import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import os from 'os';
 import sessionManager from './sessionManager.js';
+import { loadUiSettings } from './ui-settings.js';
 
 // Import TaskMaster detection functions
 async function detectTaskMasterFolder(projectPath) {
@@ -382,13 +383,27 @@ async function extractProjectDirectory(projectName) {
 
 async function getProjects(progressCallback = null) {
   const claudeDir = path.join(os.homedir(), '.claude', 'projects');
-  const config = await loadProjectConfig();
+  const [config, uiSettings] = await Promise.all([
+    loadProjectConfig(),
+    loadUiSettings(),
+  ]);
+  const codexAutoDiscoverProjects = uiSettings.codexAutoDiscoverProjects !== false;
   const projects = [];
   const existingProjects = new Set();
+  const knownProjectPaths = new Set();
   const codexSessionsIndexRef = { sessionsByProject: null };
   let totalProjects = 0;
   let processedProjects = 0;
   let directories = [];
+
+  if (codexAutoDiscoverProjects) {
+    try {
+      codexSessionsIndexRef.sessionsByProject = await buildCodexSessionsIndex();
+    } catch (error) {
+      console.warn('Could not build Codex sessions index:', error.message);
+      codexSessionsIndexRef.sessionsByProject = new Map();
+    }
+  }
 
   try {
     // Check if the .claude/projects directory exists
@@ -423,6 +438,10 @@ async function getProjects(progressCallback = null) {
 
       // Extract actual project directory from JSONL sessions
       const actualProjectDir = await extractProjectDirectory(entry.name);
+      const normalizedActualProjectPath = normalizeComparablePath(actualProjectDir);
+      if (normalizedActualProjectPath) {
+        knownProjectPaths.add(normalizedActualProjectPath);
+      }
 
       // Get display name from config or generate one
       const customName = config[entry.name]?.displayName;
@@ -544,6 +563,11 @@ async function getProjects(progressCallback = null) {
         }
       }
 
+      const normalizedActualProjectPath = normalizeComparablePath(actualProjectDir);
+      if (normalizedActualProjectPath) {
+        knownProjectPaths.add(normalizedActualProjectPath);
+      }
+
       const project = {
         name: projectName,
         path: actualProjectDir,
@@ -612,6 +636,81 @@ async function getProjects(progressCallback = null) {
 
       projects.push(project);
     }
+  }
+
+  if (codexAutoDiscoverProjects) {
+    const sessionsByProject = codexSessionsIndexRef.sessionsByProject || new Map();
+
+    for (const [normalizedProjectPath, codexSessions] of sessionsByProject.entries()) {
+      if (!normalizedProjectPath || knownProjectPaths.has(normalizedProjectPath)) {
+        continue;
+      }
+
+      if (!Array.isArray(codexSessions) || codexSessions.length === 0) {
+        continue;
+      }
+
+      const representativeSession = codexSessions.find(
+        (session) => typeof session.cwd === 'string' && session.cwd.trim(),
+      );
+      const actualProjectDir = representativeSession?.cwd
+        ? path.resolve(representativeSession.cwd)
+        : normalizedProjectPath;
+      const projectName = actualProjectDir.replace(/[\\/:\s~_]/g, '-');
+
+      if (
+        projects.some(
+          (project) => normalizeComparablePath(project.fullPath || project.path) === normalizedProjectPath,
+        )
+      ) {
+        knownProjectPaths.add(normalizedProjectPath);
+        continue;
+      }
+
+      // Keep reverse lookup stable for follow-up API calls that resolve projectName -> path.
+      projectDirectoryCache.set(projectName, actualProjectDir);
+
+      const project = {
+        name: projectName,
+        path: actualProjectDir,
+        displayName: await generateDisplayName(projectName, actualProjectDir),
+        fullPath: actualProjectDir,
+        isAutoDiscovered: true,
+        sessions: [],
+        geminiSessions: [],
+        sessionMeta: {
+          hasMore: false,
+          total: 0,
+        },
+        cursorSessions: [],
+        codexSessions: codexSessions.slice(0, 5),
+      };
+
+      try {
+        const taskMasterResult = await detectTaskMasterFolder(actualProjectDir);
+        project.taskmaster = {
+          hasTaskmaster: taskMasterResult.hasTaskmaster,
+          hasEssentialFiles: taskMasterResult.hasEssentialFiles,
+          metadata: taskMasterResult.metadata,
+          status: taskMasterResult.hasTaskmaster && taskMasterResult.hasEssentialFiles
+            ? 'taskmaster-only'
+            : 'not-configured',
+        };
+      } catch (error) {
+        project.taskmaster = {
+          status: 'error',
+          hasTaskmaster: false,
+          hasEssentialFiles: false,
+          error: error.message,
+        };
+      }
+
+      knownProjectPaths.add(normalizedProjectPath);
+      projects.push(project);
+    }
+
+    totalProjects = Math.max(totalProjects, projects.length);
+    processedProjects = Math.max(processedProjects, totalProjects);
   }
 
   // Emit completion after all projects (including manual) are processed

@@ -5,6 +5,13 @@ import ImageAttachment from './ImageAttachment';
 import PermissionRequestsBanner from './PermissionRequestsBanner';
 import ChatInputControls from './ChatInputControls';
 import { useTranslation } from 'react-i18next';
+import {
+  CLAUDE_MODELS,
+  CODEX_MODELS,
+  CODEX_REASONING_LEVELS,
+  CURSOR_MODELS,
+  GEMINI_MODELS,
+} from '../../../../../shared/modelConstants';
 import type {
   ChangeEvent,
   ClipboardEvent,
@@ -17,7 +24,7 @@ import type {
   SetStateAction,
   TouchEvent,
 } from 'react';
-import type { PendingPermissionRequest, PermissionMode, Provider } from '../../types/types';
+import type { PendingPermissionRequest, PermissionMode, Provider, TokenBudget } from '../../types/types';
 
 interface MentionableFile {
   name: string;
@@ -45,11 +52,21 @@ interface ChatComposerProps {
   isLoading: boolean;
   onAbortSession: () => void;
   provider: Provider | string;
+  claudeModel: string;
+  setClaudeModel: (model: string) => void;
+  cursorModel: string;
+  setCursorModel: (model: string) => void;
+  codexModel: string;
+  setCodexModel: (model: string) => void;
+  codexReasoningEffort: string;
+  setCodexReasoningEffort: (effort: string) => void;
+  geminiModel: string;
+  setGeminiModel: (model: string) => void;
   permissionMode: PermissionMode | string;
   onModeSwitch: () => void;
   thinkingMode: string;
   setThinkingMode: Dispatch<SetStateAction<string>>;
-  tokenBudget: { used?: number; total?: number } | null;
+  tokenBudget: TokenBudget | null;
   slashCommandsCount: number;
   onToggleCommandMenu: () => void;
   hasInput: boolean;
@@ -102,6 +119,16 @@ export default function ChatComposer({
   isLoading,
   onAbortSession,
   provider,
+  claudeModel,
+  setClaudeModel,
+  cursorModel,
+  setCursorModel,
+  codexModel,
+  setCodexModel,
+  codexReasoningEffort,
+  setCodexReasoningEffort,
+  geminiModel,
+  setGeminiModel,
   permissionMode,
   onModeSwitch,
   thinkingMode,
@@ -163,6 +190,61 @@ export default function ChatComposer({
     (r) => r.toolName === 'AskUserQuestion'
   );
 
+  const baseModelOptions =
+    provider === 'claude'
+      ? CLAUDE_MODELS.OPTIONS
+      : provider === 'codex'
+        ? CODEX_MODELS.OPTIONS
+        : provider === 'gemini'
+          ? GEMINI_MODELS.OPTIONS
+          : CURSOR_MODELS.OPTIONS;
+  const currentModel =
+    provider === 'claude'
+      ? claudeModel
+      : provider === 'codex'
+        ? codexModel
+        : provider === 'gemini'
+          ? geminiModel
+          : cursorModel;
+  const modelOptions =
+    currentModel && !baseModelOptions.some(({ value }) => value === currentModel)
+      ? [{ value: currentModel, label: currentModel }, ...baseModelOptions]
+      : baseModelOptions;
+
+  const handleModelChange = (nextModel: string) => {
+    if (provider === 'claude') {
+      setClaudeModel(nextModel);
+      localStorage.setItem('claude-model', nextModel);
+      return;
+    }
+
+    if (provider === 'codex') {
+      setCodexModel(nextModel);
+      localStorage.setItem('codex-model', nextModel);
+      return;
+    }
+
+    if (provider === 'gemini') {
+      setGeminiModel(nextModel);
+      localStorage.setItem('gemini-model', nextModel);
+      return;
+    }
+
+    setCursorModel(nextModel);
+    localStorage.setItem('cursor-model', nextModel);
+  };
+
+  const reasoningOptions =
+    codexReasoningEffort &&
+    !CODEX_REASONING_LEVELS.OPTIONS.some(({ value }) => value === codexReasoningEffort)
+      ? [{ value: codexReasoningEffort, label: codexReasoningEffort }, ...CODEX_REASONING_LEVELS.OPTIONS]
+      : CODEX_REASONING_LEVELS.OPTIONS;
+
+  const handleReasoningChange = (nextEffort: string) => {
+    setCodexReasoningEffort(nextEffort);
+    localStorage.setItem('codex-reasoning-effort', nextEffort);
+  };
+
   // On mobile, when input is focused, float the input box at the bottom
   const mobileFloatingClass = isInputFocused
     ? 'max-sm:fixed max-sm:bottom-0 max-sm:left-0 max-sm:right-0 max-sm:z-50 max-sm:bg-background max-sm:shadow-[0_-4px_20px_rgba(0,0,0,0.15)]'
@@ -192,6 +274,12 @@ export default function ChatComposer({
           permissionMode={permissionMode}
           onModeSwitch={onModeSwitch}
           provider={provider}
+          currentModel={currentModel}
+          modelOptions={modelOptions}
+          onModelChange={handleModelChange}
+          currentReasoningEffort={codexReasoningEffort}
+          reasoningOptions={reasoningOptions}
+          onReasoningChange={handleReasoningChange}
           thinkingMode={thinkingMode}
           setThinkingMode={setThinkingMode}
           tokenBudget={tokenBudget}

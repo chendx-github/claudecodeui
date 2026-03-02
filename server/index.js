@@ -334,6 +334,179 @@ function shouldAutoOpenUrlFromOutput(value = '') {
     );
 }
 
+const SHELL_EXTRA_ARGS_MAX_LENGTH = 512;
+const SHELL_EXTRA_ARGS_MAX_COUNT = 24;
+const SHELL_EXTRA_ARG_TOKEN_MAX_LENGTH = 160;
+const SHELL_EXTRA_ARG_CONTROL_CHAR_REGEX = /[\u0000-\u001F\u007F]/;
+const CODEX_SHELL_REASONING_LEVELS = new Set(['low', 'medium', 'high', 'xhigh']);
+
+function splitShellLikeArgs(rawValue = '') {
+    const tokens = [];
+    let current = '';
+    let quote = null;
+    let escaping = false;
+
+    for (let i = 0; i < rawValue.length; i++) {
+        const char = rawValue[i];
+
+        if (escaping) {
+            current += char;
+            escaping = false;
+            continue;
+        }
+
+        if (char === '\\' && quote !== '\'') {
+            escaping = true;
+            continue;
+        }
+
+        if (quote) {
+            if (char === quote) {
+                quote = null;
+            } else {
+                current += char;
+            }
+            continue;
+        }
+
+        if (char === '"' || char === '\'') {
+            quote = char;
+            continue;
+        }
+
+        if (/\s/.test(char)) {
+            if (current) {
+                tokens.push(current);
+                current = '';
+            }
+            continue;
+        }
+
+        current += char;
+    }
+
+    if (escaping) {
+        current += '\\';
+    }
+    if (quote) {
+        return null;
+    }
+    if (current) {
+        tokens.push(current);
+    }
+
+    return tokens;
+}
+
+function parseShellExtraArgs(rawValue = '') {
+    if (typeof rawValue !== 'string') {
+        return [];
+    }
+
+    const normalized = rawValue.trim();
+    if (!normalized) {
+        return [];
+    }
+
+    if (normalized.length > SHELL_EXTRA_ARGS_MAX_LENGTH) {
+        console.warn('[WARN] shellExtraArgs too long, ignoring');
+        return [];
+    }
+
+    const tokens = splitShellLikeArgs(normalized);
+    if (!tokens) {
+        console.warn('[WARN] shellExtraArgs has unmatched quotes, ignoring');
+        return [];
+    }
+
+    const limitedTokens = tokens.slice(0, SHELL_EXTRA_ARGS_MAX_COUNT);
+    const safeTokens = limitedTokens.filter((token) =>
+        token.length > 0 &&
+        token.length <= SHELL_EXTRA_ARG_TOKEN_MAX_LENGTH &&
+        !SHELL_EXTRA_ARG_CONTROL_CHAR_REGEX.test(token)
+    );
+
+    if (limitedTokens.length !== tokens.length) {
+        console.warn('[WARN] shellExtraArgs has too many tokens; extras were ignored');
+    }
+    if (safeTokens.length !== limitedTokens.length) {
+        console.warn('[WARN] shellExtraArgs contains unsupported control characters or oversized tokens; they were removed');
+    }
+
+    return safeTokens;
+}
+
+function sanitizeShellModel(rawModel) {
+    if (typeof rawModel !== 'string') {
+        return '';
+    }
+
+    const trimmed = rawModel.trim();
+    if (!trimmed || trimmed.length > 120 || SHELL_EXTRA_ARG_CONTROL_CHAR_REGEX.test(trimmed)) {
+        return '';
+    }
+    return trimmed;
+}
+
+function sanitizeShellReasoning(rawReasoning) {
+    if (typeof rawReasoning !== 'string') {
+        return '';
+    }
+
+    const normalized = rawReasoning.trim().toLowerCase();
+    return CODEX_SHELL_REASONING_LEVELS.has(normalized) ? normalized : '';
+}
+
+function escapePosixShellArg(value = '') {
+    return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
+function escapePowerShellArg(value = '') {
+    return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+function joinPosixCommand(commandArgs = []) {
+    if (!Array.isArray(commandArgs) || commandArgs.length === 0) {
+        return '';
+    }
+
+    const [command, ...args] = commandArgs;
+    const safeCommand = /^[A-Za-z0-9._/-]+$/.test(command) ? command : escapePosixShellArg(command);
+    const renderedArgs = args.map((arg) => escapePosixShellArg(arg)).join(' ');
+    return renderedArgs ? `${safeCommand} ${renderedArgs}` : safeCommand;
+}
+
+function joinPowerShellCommand(commandArgs = []) {
+    if (!Array.isArray(commandArgs) || commandArgs.length === 0) {
+        return '';
+    }
+
+    const [command, ...args] = commandArgs;
+    const renderedArgs = args.map((arg) => escapePowerShellArg(arg)).join(' ');
+    return renderedArgs
+        ? `& ${escapePowerShellArg(command)} ${renderedArgs}`
+        : `& ${escapePowerShellArg(command)}`;
+}
+
+function buildCodexCommandArgs({ sessionId = null, model = '', reasoningEffort = '', extraArgs = [] } = {}) {
+    const baseArgs = [];
+    if (model) {
+        baseArgs.push('--model', model);
+    }
+    if (reasoningEffort) {
+        baseArgs.push('--config', `model_reasoning_effort="${reasoningEffort}"`);
+    }
+    if (Array.isArray(extraArgs) && extraArgs.length > 0) {
+        baseArgs.push(...extraArgs);
+    }
+
+    if (sessionId) {
+        return ['codex', 'resume', ...baseArgs, sessionId];
+    }
+
+    return ['codex', ...baseArgs];
+}
+
 // Single WebSocket server that handles both paths
 const wss = new WebSocketServer({
     server,
@@ -1328,6 +1501,9 @@ function handleShellConnection(ws) {
                 const hasSession = data.hasSession;
                 const provider = data.provider || 'claude';
                 const initialCommand = data.initialCommand;
+                const shellModel = sanitizeShellModel(data.shellModel);
+                const shellReasoningEffort = sanitizeShellReasoning(data.shellReasoningEffort);
+                const shellExtraArgs = parseShellExtraArgs(data.shellExtraArgs);
                 let isPlainShell = data.isPlainShell || (!!initialCommand && !hasSession) || provider === 'plain-shell';
                 urlDetectionBuffer = '';
                 announcedAuthUrls.clear();
@@ -1339,9 +1515,19 @@ function handleShellConnection(ws) {
                     initialCommand.includes('auth login')
                 );
 
+                const hasCodexOverrides =
+                    !isPlainShell &&
+                    provider === 'codex' &&
+                    (Boolean(shellModel) || Boolean(shellReasoningEffort) || shellExtraArgs.length > 0);
+                const codexShellSignature = hasCodexOverrides
+                    ? `${shellModel}|${shellReasoningEffort}|${shellExtraArgs.join(' ')}`
+                    : '';
+
                 // Include command hash in session key so different commands get separate sessions
                 const commandSuffix = isPlainShell && initialCommand
                     ? `_cmd_${Buffer.from(initialCommand).toString('base64').slice(0, 16)}`
+                    : codexShellSignature
+                        ? `_codex_${Buffer.from(codexShellSignature).toString('base64').slice(0, 16)}`
                     : '';
                 ptySessionKey = `${projectPath}_${sessionId || 'default'}${commandSuffix}`;
 
@@ -1389,12 +1575,25 @@ function handleShellConnection(ws) {
                 if (initialCommand) {
                     console.log('⚡ Initial command:', initialCommand);
                 }
+                if (!isPlainShell && provider === 'codex') {
+                    if (shellModel) {
+                        console.log('🧠 Codex shell model override:', shellModel);
+                    }
+                    if (shellReasoningEffort) {
+                        console.log('🧩 Codex shell reasoning override:', shellReasoningEffort);
+                    }
+                    if (shellExtraArgs.length > 0) {
+                        console.log('⚙️ Codex shell extra args:', shellExtraArgs.join(' '));
+                    }
+                }
 
                 if (!isPlainShell) {
                     const requiredCommand = provider === 'cursor'
                         ? 'cursor-agent'
                         : provider === 'codex'
                             ? 'codex'
+                            : provider === 'gemini'
+                                ? 'gemini'
                             : 'claude';
 
                     if (!isCommandAvailable(requiredCommand)) {
@@ -1402,6 +1601,8 @@ function handleShellConnection(ws) {
                             ? 'Cursor'
                             : provider === 'codex'
                                 ? 'Codex'
+                                : provider === 'gemini'
+                                    ? 'Gemini'
                                 : 'Claude';
 
                         ws.send(JSON.stringify({
@@ -1465,19 +1666,37 @@ function handleShellConnection(ws) {
 
                     } else if (provider === 'codex') {
                         // Use codex command
+                        const codexStartArgs = buildCodexCommandArgs({
+                            model: shellModel,
+                            reasoningEffort: shellReasoningEffort,
+                            extraArgs: shellExtraArgs,
+                        });
+                        const codexResumeArgs = hasSession && sessionId
+                            ? buildCodexCommandArgs({
+                                sessionId,
+                                model: shellModel,
+                                reasoningEffort: shellReasoningEffort,
+                                extraArgs: shellExtraArgs,
+                            })
+                            : null;
+
                         if (os.platform() === 'win32') {
-                            if (hasSession && sessionId) {
-                                // Try to resume session, but with fallback to a new session if it fails
-                                shellCommand = `Set-Location -Path "${projectPath}"; codex resume "${sessionId}"; if ($LASTEXITCODE -ne 0) { codex }`;
+                            const startCommand = joinPowerShellCommand(codexStartArgs);
+                            if (codexResumeArgs) {
+                                // Try to resume session, but with fallback to a new session if it fails.
+                                const resumeCommand = joinPowerShellCommand(codexResumeArgs);
+                                shellCommand = `Set-Location -Path ${escapePowerShellArg(projectPath)}; ${resumeCommand}; if ($LASTEXITCODE -ne 0) { ${startCommand} }`;
                             } else {
-                                shellCommand = `Set-Location -Path "${projectPath}"; codex`;
+                                shellCommand = `Set-Location -Path ${escapePowerShellArg(projectPath)}; ${startCommand}`;
                             }
                         } else {
-                            if (hasSession && sessionId) {
-                                // Try to resume session, but with fallback to a new session if it fails
-                                shellCommand = `cd "${projectPath}" && codex resume "${sessionId}" || codex`;
+                            const startCommand = joinPosixCommand(codexStartArgs);
+                            if (codexResumeArgs) {
+                                // Try to resume session, but with fallback to a new session if it fails.
+                                const resumeCommand = joinPosixCommand(codexResumeArgs);
+                                shellCommand = `cd ${escapePosixShellArg(projectPath)} && ${resumeCommand} || ${startCommand}`;
                             } else {
-                                shellCommand = `cd "${projectPath}" && codex`;
+                                shellCommand = `cd ${escapePosixShellArg(projectPath)} && ${startCommand}`;
                             }
                         }
                     } else if (provider === 'gemini') {
@@ -2049,7 +2268,10 @@ app.get('/api/projects/:projectName/sessions/:sessionId/token-usage', authentica
 
             return res.json({
                 used: totalTokens,
-                total: contextWindow
+                total: contextWindow,
+                metricType: 'lifetime_tokens',
+                source: 'codex',
+                observedAt: new Date().toISOString(),
             });
         }
 
@@ -2094,6 +2316,7 @@ app.get('/api/projects/:projectName/sessions/:sessionId/token-usage', authentica
         let inputTokens = 0;
         let cacheCreationTokens = 0;
         let cacheReadTokens = 0;
+        let contextWindowFromUsage = 0;
 
         // Find the latest assistant message with usage data (scan from end)
         for (let i = lines.length - 1; i >= 0; i--) {
@@ -2108,6 +2331,9 @@ app.get('/api/projects/:projectName/sessions/:sessionId/token-usage', authentica
                     inputTokens = usage.input_tokens || 0;
                     cacheCreationTokens = usage.cache_creation_input_tokens || 0;
                     cacheReadTokens = usage.cache_read_input_tokens || 0;
+                    if (usage.model_context_window) {
+                        contextWindowFromUsage = Number(usage.model_context_window) || 0;
+                    }
 
                     break; // Stop after finding the latest assistant message
                 }
@@ -2119,10 +2345,14 @@ app.get('/api/projects/:projectName/sessions/:sessionId/token-usage', authentica
 
         // Calculate total context usage (excluding output_tokens, as per ccusage)
         const totalUsed = inputTokens + cacheCreationTokens + cacheReadTokens;
+        const resolvedContextWindow = contextWindowFromUsage > 0 ? contextWindowFromUsage : contextWindow;
 
         res.json({
             used: totalUsed,
-            total: contextWindow,
+            total: resolvedContextWindow,
+            metricType: 'current_context_usage',
+            source: 'claude',
+            observedAt: new Date().toISOString(),
             breakdown: {
                 input: inputTokens,
                 cacheCreation: cacheCreationTokens,

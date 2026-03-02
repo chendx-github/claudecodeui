@@ -122,6 +122,8 @@
     "disabled": "Input disabled",
     "attachFiles": "Attach files",
     "attachImages": "Attach images",
+    "model": "Model",
+    "changeModel": "Change model for next turn",
     "send": "Send",
     "stop": "Stop",
     "hintText": {
@@ -173,6 +175,7 @@
     "title": "Choose Your AI Assistant",
     "description": "Select a provider to start a new conversation",
     "selectModel": "Select Model",
+    "selectReasoning": "Reasoning Level",
     "providerInfo": {
       "anthropic": "by Anthropic",
       "openai": "by OpenAI",

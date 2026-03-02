@@ -17,6 +17,22 @@ export interface ToolResult {
   [key: string]: unknown;
 }
 
+export interface TokenBudget {
+  used: number;
+  total: number;
+  metricType?: 'current_context_usage' | 'lifetime_tokens';
+  source?: 'claude' | 'codex' | string;
+  observedAt?: string;
+  breakdown?: {
+    input?: number;
+    output?: number;
+    cacheRead?: number;
+    cacheCreation?: number;
+    [key: string]: unknown;
+  };
+  [key: string]: unknown;
+}
+
 export interface SubagentChildTool {
   toolId: string;
   toolName: string;

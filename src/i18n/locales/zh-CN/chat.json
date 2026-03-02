@@ -104,6 +104,8 @@
     "disabled": "输入已禁用",
     "attachFiles": "附加文件",
     "attachImages": "附加图片",
+    "model": "模型",
+    "changeModel": "切换下一轮使用的模型",
     "send": "发送",
     "stop": "停止",
     "hintText": {
@@ -155,6 +157,7 @@
     "title": "选择您的 AI 助手",
     "description": "选择一个供应商以开始新对话",
     "selectModel": "选择模型",
+    "selectReasoning": "推理级别",
     "providerInfo": {
       "anthropic": "由 Anthropic 提供",
       "openai": "由 OpenAI 提供",

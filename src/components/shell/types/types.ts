@@ -15,6 +15,9 @@ export type ShellInitMessage = {
   rows: number;
   initialCommand: string | null | undefined;
   isPlainShell: boolean;
+  shellModel?: string;
+  shellReasoningEffort?: string;
+  shellExtraArgs?: string;
 };
 
 export type ShellResizeMessage = {

@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import { decodeHtmlEntities, formatUsageLimitText } from '../utils/chatFormatting';
 import { safeLocalStorage } from '../utils/chatStorage';
-import type { ChatMessage, PendingPermissionRequest } from '../types/types';
+import type { ChatMessage, PendingPermissionRequest, TokenBudget } from '../types/types';
 import type { Project, ProjectSession, SessionProvider } from '../../../types/app';
 
 type PendingViewSession = {
@@ -37,7 +37,7 @@ interface UseChatRealtimeHandlersArgs {
   setIsLoading: (loading: boolean) => void;
   setCanAbortSession: (canAbort: boolean) => void;
   setClaudeStatus: (status: { text: string; tokens: number; can_interrupt: boolean } | null) => void;
-  setTokenBudget: (budget: Record<string, unknown> | null) => void;
+  setTokenBudget: Dispatch<SetStateAction<TokenBudget | null>>;
   setIsSystemSessionChange: (isSystemSessionChange: boolean) => void;
   setPendingPermissionRequests: Dispatch<SetStateAction<PendingPermissionRequest[]>>;
   pendingViewSessionRef: MutableRefObject<PendingViewSession | null>;
@@ -89,6 +89,33 @@ const finalizeStreamingMessage = (setChatMessages: Dispatch<SetStateAction<ChatM
     }
     return updated;
   });
+};
+
+const toFiniteNumber = (value: unknown): number | null => {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+  return parsed;
+};
+
+const normalizeTokenBudget = (value: unknown): TokenBudget | null => {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+
+  const used = toFiniteNumber((value as Record<string, unknown>).used);
+  const total = toFiniteNumber((value as Record<string, unknown>).total);
+
+  if (used === null || total === null || total <= 0) {
+    return null;
+  }
+
+  return {
+    ...(value as Record<string, unknown>),
+    used: Math.max(0, used),
+    total: Math.max(1, total),
+  } as TokenBudget;
 };
 
 export function useChatRealtimeHandlers({
@@ -252,7 +279,16 @@ export function useChatRealtimeHandlers({
 
       case 'token-budget':
         if (latestMessage.data) {
-          setTokenBudget(latestMessage.data);
+          const normalizedBudget = normalizeTokenBudget(latestMessage.data);
+          if (!normalizedBudget) {
+            break;
+          }
+
+          if (normalizedBudget.metricType === 'lifetime_tokens') {
+            break;
+          }
+
+          setTokenBudget(normalizedBudget);
         }
         break;
 

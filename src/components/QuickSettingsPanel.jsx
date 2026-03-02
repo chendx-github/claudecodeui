@@ -14,14 +14,17 @@ import {
   FileText,
   Languages,
   GripVertical,
-  Folder
+  Folder,
+  Terminal
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import DarkModeToggle from './DarkModeToggle';
+import { CODEX_MODELS, CODEX_REASONING_LEVELS } from '../../shared/modelConstants';
 
 import { useUiPreferences } from '../hooks/useUiPreferences';
 import { useTheme } from '../contexts/ThemeContext';
 import LanguageSelector from './LanguageSelector';
+import { authenticatedFetch } from '../utils/api';
 
 import { useDeviceSettings } from '../hooks/useDeviceSettings';
 
@@ -29,9 +32,25 @@ import { useDeviceSettings } from '../hooks/useDeviceSettings';
 const QuickSettingsPanel = () => {
   const { t } = useTranslation('settings');
   const [isOpen, setIsOpen] = useState(false);
+  const [shellCodexModel, setShellCodexModel] = useState(() => {
+    return localStorage.getItem('shell-codex-model') || localStorage.getItem('codex-model') || '';
+  });
+  const [shellCodexReasoning, setShellCodexReasoning] = useState(() => {
+    return (
+      localStorage.getItem('shell-codex-reasoning') ||
+      localStorage.getItem('codex-reasoning-effort') ||
+      CODEX_REASONING_LEVELS.DEFAULT
+    );
+  });
+  const [shellCodexExtraArgs, setShellCodexExtraArgs] = useState(() => {
+    return localStorage.getItem('shell-codex-extra-args') || '';
+  });
   const [whisperMode, setWhisperMode] = useState(() => {
     return localStorage.getItem('whisperMode') || 'default';
   });
+  const [codexAutoDiscoverProjects, setCodexAutoDiscoverProjects] = useState(true);
+  const [isCodexPreferenceLoading, setIsCodexPreferenceLoading] = useState(true);
+  const [isCodexPreferenceSaving, setIsCodexPreferenceSaving] = useState(false);
   const { isDarkMode } = useTheme();
 
   const { isMobile } = useDeviceSettings({ trackPWA: false });
@@ -75,6 +94,100 @@ const QuickSettingsPanel = () => {
   useEffect(() => {
     localStorage.setItem('quickSettingsHandlePosition', JSON.stringify({ y: handlePosition }));
   }, [handlePosition]);
+
+  useEffect(() => {
+    const trimmedModel = shellCodexModel.trim();
+    if (trimmedModel) {
+      localStorage.setItem('shell-codex-model', trimmedModel);
+    } else {
+      localStorage.removeItem('shell-codex-model');
+    }
+  }, [shellCodexModel]);
+
+  useEffect(() => {
+    const normalizedReasoning = shellCodexReasoning.trim();
+    if (normalizedReasoning) {
+      localStorage.setItem('shell-codex-reasoning', normalizedReasoning);
+    } else {
+      localStorage.removeItem('shell-codex-reasoning');
+    }
+  }, [shellCodexReasoning]);
+
+  useEffect(() => {
+    const normalizedArgs = shellCodexExtraArgs.trim();
+    if (normalizedArgs) {
+      localStorage.setItem('shell-codex-extra-args', normalizedArgs);
+    } else {
+      localStorage.removeItem('shell-codex-extra-args');
+    }
+  }, [shellCodexExtraArgs]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadUiSettings = async () => {
+      setIsCodexPreferenceLoading(true);
+      try {
+        const response = await authenticatedFetch('/api/settings/ui-preferences');
+        if (!response.ok) {
+          throw new Error(`Failed to fetch UI preferences: ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (cancelled) {
+          return;
+        }
+
+        if (typeof data?.preferences?.codexAutoDiscoverProjects === 'boolean') {
+          setCodexAutoDiscoverProjects(data.preferences.codexAutoDiscoverProjects);
+        }
+      } catch (error) {
+        console.error('Error loading UI preferences:', error);
+      } finally {
+        if (!cancelled) {
+          setIsCodexPreferenceLoading(false);
+        }
+      }
+    };
+
+    void loadUiSettings();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleCodexAutoDiscoverToggle = useCallback(
+    async (nextValue) => {
+      const previousValue = codexAutoDiscoverProjects;
+      setCodexAutoDiscoverProjects(nextValue);
+      setIsCodexPreferenceSaving(true);
+
+      try {
+        const response = await authenticatedFetch('/api/settings/ui-preferences', {
+          method: 'PATCH',
+          body: JSON.stringify({ codexAutoDiscoverProjects: nextValue }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to update UI preferences: ${response.status}`);
+        }
+
+        const data = await response.json();
+        if (typeof data?.preferences?.codexAutoDiscoverProjects === 'boolean') {
+          setCodexAutoDiscoverProjects(data.preferences.codexAutoDiscoverProjects);
+        }
+
+        window.dispatchEvent(new CustomEvent('projects:refresh-request'));
+      } catch (error) {
+        console.error('Error updating UI preferences:', error);
+        setCodexAutoDiscoverProjects(previousValue);
+      } finally {
+        setIsCodexPreferenceSaving(false);
+      }
+    },
+    [codexAutoDiscoverProjects],
+  );
 
   // Calculate position from percentage
   const getPositionStyle = useCallback(() => {
@@ -209,6 +322,16 @@ const QuickSettingsPanel = () => {
 
     setIsOpen((previous) => !previous);
   };
+
+  const shellModelOptions =
+    shellCodexModel && !CODEX_MODELS.OPTIONS.some(({ value }) => value === shellCodexModel)
+      ? [{ value: shellCodexModel, label: shellCodexModel }, ...CODEX_MODELS.OPTIONS]
+      : CODEX_MODELS.OPTIONS;
+  const shellReasoningOptions =
+    shellCodexReasoning &&
+    !CODEX_REASONING_LEVELS.OPTIONS.some(({ value }) => value === shellCodexReasoning)
+      ? [{ value: shellCodexReasoning, label: shellCodexReasoning }, ...CODEX_REASONING_LEVELS.OPTIONS]
+      : CODEX_REASONING_LEVELS.OPTIONS;
 
   return (
     <>
@@ -364,6 +487,83 @@ const QuickSettingsPanel = () => {
                   className="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 dark:text-blue-500 focus:ring-blue-500 focus:ring-2 dark:focus:ring-blue-400 bg-gray-100 dark:bg-gray-800 checked:bg-blue-600 dark:checked:bg-blue-600"
                 />
               </label>
+
+              <label className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer transition-colors border border-transparent hover:border-gray-300 dark:hover:border-gray-600">
+                <span className="flex items-center gap-2 text-sm text-gray-900 dark:text-white">
+                  <Folder className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                  {t('quickSettings.autoDiscoverCodexProjects')}
+                </span>
+                <input
+                  type="checkbox"
+                  checked={codexAutoDiscoverProjects}
+                  disabled={isCodexPreferenceLoading || isCodexPreferenceSaving}
+                  onChange={(e) => {
+                    void handleCodexAutoDiscoverToggle(e.target.checked);
+                  }}
+                  className="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 dark:text-blue-500 focus:ring-blue-500 focus:ring-2 dark:focus:ring-blue-400 bg-gray-100 dark:bg-gray-800 checked:bg-blue-600 dark:checked:bg-blue-600 disabled:opacity-60"
+                />
+              </label>
+            </div>
+
+            {/* Shell Launch Settings */}
+            <div className="space-y-2">
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400 mb-2">
+                {t('quickSettings.sections.shellLaunch')}
+              </h4>
+
+              <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-800 border border-transparent hover:border-gray-300 dark:hover:border-gray-600 transition-colors">
+                <label className="flex items-center gap-2 text-sm text-gray-900 dark:text-white mb-2">
+                  <Terminal className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                  {t('quickSettings.shell.codexModel')}
+                </label>
+                <select
+                  value={shellCodexModel}
+                  onChange={(event) => setShellCodexModel(event.target.value)}
+                  className="w-full px-2 py-1.5 text-sm rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">{t('quickSettings.shell.useSessionDefault')}</option>
+                  {shellModelOptions.map(({ value, label }) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-800 border border-transparent hover:border-gray-300 dark:hover:border-gray-600 transition-colors">
+                <label className="flex items-center gap-2 text-sm text-gray-900 dark:text-white mb-2">
+                  <Brain className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                  {t('quickSettings.shell.reasoningLevel')}
+                </label>
+                <select
+                  value={shellCodexReasoning}
+                  onChange={(event) => setShellCodexReasoning(event.target.value)}
+                  className="w-full px-2 py-1.5 text-sm rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  {shellReasoningOptions.map(({ value, label }) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-800 border border-transparent hover:border-gray-300 dark:hover:border-gray-600 transition-colors">
+                <label className="flex items-center gap-2 text-sm text-gray-900 dark:text-white mb-2">
+                  <Settings2 className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                  {t('quickSettings.shell.extraArgs')}
+                </label>
+                <input
+                  type="text"
+                  value={shellCodexExtraArgs}
+                  onChange={(event) => setShellCodexExtraArgs(event.target.value)}
+                  placeholder={t('quickSettings.shell.extraArgsPlaceholder')}
+                  className="w-full px-2 py-1.5 text-sm rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <p className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                  {t('quickSettings.shell.appliesOnReconnect')}
+                </p>
+              </div>
             </div>
 
             {/* Input Settings */}

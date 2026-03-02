@@ -55,6 +55,7 @@
       "appearance": "외관",
       "toolDisplay": "도구 표시",
       "viewOptions": "보기 옵션",
+      "shellLaunch": "Shell 실행",
       "inputSettings": "입력 설정",
       "whisperDictation": "Whisper 음성 인식"
     },
@@ -65,8 +66,17 @@
     "showInjectedContext": "주입된 AGENTS 컨텍스트 표시",
     "autoScrollToBottom": "자동 스크롤",
     "showIgnoredDirectories": "Files에서 무시된 디렉터리 표시",
+    "autoDiscoverCodexProjects": "Codex 전용 프로젝트 자동 검색",
     "sendByCtrlEnter": "Ctrl+Enter로 전송",
     "sendByCtrlEnterDescription": "활성화하면 Enter 대신 Ctrl+Enter로 메시지를 전송합니다. IME 사용자가 실수로 전송하는 것을 방지하는 데 유용합니다.",
+    "shell": {
+      "codexModel": "Codex 모델",
+      "useSessionDefault": "세션/기본 모델 사용",
+      "reasoningLevel": "추론 레벨",
+      "extraArgs": "추가 실행 인수",
+      "extraArgsPlaceholder": "예: --search --approval-mode never",
+      "appliesOnReconnect": "Shell 이 Codex에 다음 번 연결/재연결할 때 적용됩니다."
+    },
     "dragHandle": {
       "dragging": "드래그 핸들",
       "closePanel": "설정 패널 닫기",

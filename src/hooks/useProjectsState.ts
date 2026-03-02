@@ -481,6 +481,17 @@ export function useProjectsState({
     }
   }, [selectedProject, selectedSession]);
 
+  useEffect(() => {
+    const handleProjectsRefreshRequest = () => {
+      void handleSidebarRefresh();
+    };
+
+    window.addEventListener('projects:refresh-request', handleProjectsRefreshRequest);
+    return () => {
+      window.removeEventListener('projects:refresh-request', handleProjectsRefreshRequest);
+    };
+  }, [handleSidebarRefresh]);
+
   const handleProjectDelete = useCallback(
     (projectName: string) => {
       if (selectedProject?.name === projectName) {

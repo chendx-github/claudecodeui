@@ -26,6 +26,9 @@ interface ChatMessagesPaneProps {
   setCursorModel: (model: string) => void;
   codexModel: string;
   setCodexModel: (model: string) => void;
+  codexModelOptions: Array<{ value: string; label: string }>;
+  codexReasoningEffort: string;
+  setCodexReasoningEffort: (effort: string) => void;
   geminiModel: string;
   setGeminiModel: (model: string) => void;
   tasksEnabled: boolean;
@@ -51,6 +54,7 @@ interface ChatMessagesPaneProps {
   autoExpandTools?: boolean;
   showRawParameters?: boolean;
   showThinking?: boolean;
+  showInjectedContext?: boolean;
   selectedProject: Project;
   isLoading: boolean;
 }
@@ -72,6 +76,9 @@ export default function ChatMessagesPane({
   setCursorModel,
   codexModel,
   setCodexModel,
+  codexModelOptions,
+  codexReasoningEffort,
+  setCodexReasoningEffort,
   geminiModel,
   setGeminiModel,
   tasksEnabled,
@@ -97,6 +104,7 @@ export default function ChatMessagesPane({
   autoExpandTools,
   showRawParameters,
   showThinking,
+  showInjectedContext,
   selectedProject,
   isLoading,
 }: ChatMessagesPaneProps) {
@@ -156,6 +164,9 @@ export default function ChatMessagesPane({
           setCursorModel={setCursorModel}
           codexModel={codexModel}
           setCodexModel={setCodexModel}
+          codexModelOptions={codexModelOptions}
+          codexReasoningEffort={codexReasoningEffort}
+          setCodexReasoningEffort={setCodexReasoningEffort}
           geminiModel={geminiModel}
           setGeminiModel={setGeminiModel}
           tasksEnabled={tasksEnabled}
@@ -256,6 +267,7 @@ export default function ChatMessagesPane({
                 autoExpandTools={autoExpandTools}
                 showRawParameters={showRawParameters}
                 showThinking={showThinking}
+                showInjectedContext={showInjectedContext}
                 selectedProject={selectedProject}
                 provider={provider}
               />
@@ -268,4 +280,3 @@ export default function ChatMessagesPane({
     </div>
   );
 }
-

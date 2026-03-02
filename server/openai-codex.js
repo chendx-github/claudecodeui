@@ -17,6 +17,7 @@ import TOML from '@iarna/toml';
 // Track active sessions
 const activeCodexSessions = new Map();
 const CODEX_CONFIG_CACHE_TTL_MS = 5000;
+const CODEX_REASONING_EFFORT_LEVELS = new Set(['low', 'medium', 'high', 'xhigh']);
 let cachedCodexConfig = null;
 let cachedCodexConfigReadAt = 0;
 
@@ -53,6 +54,81 @@ function normalizeComparablePath(inputPath) {
 
   const resolved = path.resolve(normalized);
   return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
+}
+
+function toFiniteNumber(value) {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function readFirstPositiveNumber(...candidates) {
+  for (const candidate of candidates) {
+    const value = toFiniteNumber(candidate);
+    if (value > 0) {
+      return value;
+    }
+  }
+  return 0;
+}
+
+function extractTokenBudgetFromCodexUsage(usage) {
+  if (!usage || typeof usage !== 'object') {
+    return null;
+  }
+
+  const inputTokens = readFirstPositiveNumber(
+    usage.current_context_tokens,
+    usage.context_used_tokens,
+    usage.context_tokens,
+    usage.input_tokens,
+    usage.inputTokens,
+    usage.prompt_tokens,
+    usage.promptTokens,
+  );
+
+  const outputTokens = readFirstPositiveNumber(
+    usage.output_tokens,
+    usage.outputTokens,
+    usage.completion_tokens,
+    usage.completionTokens,
+  );
+
+  const cachedInputTokens = readFirstPositiveNumber(
+    usage.cached_input_tokens,
+    usage.cachedInputTokens,
+    usage.cache_read_input_tokens,
+    usage.cacheReadInputTokens,
+    usage.cache_creation_input_tokens,
+    usage.cacheCreationInputTokens,
+  );
+
+  const contextWindow = readFirstPositiveNumber(
+    usage.model_context_window,
+    usage.modelContextWindow,
+    usage.context_window,
+    usage.contextWindow,
+    usage.max_input_tokens,
+    usage.maxInputTokens,
+  ) || 200000;
+
+  const hasCurrentContextSignal = inputTokens > 0 || cachedInputTokens > 0;
+  const fallbackLifetimeUsed = readFirstPositiveNumber(
+    usage.total_tokens,
+    usage.totalTokens,
+  ) || inputTokens + cachedInputTokens + outputTokens;
+
+  return {
+    used: hasCurrentContextSignal ? inputTokens + cachedInputTokens : fallbackLifetimeUsed,
+    total: contextWindow,
+    metricType: hasCurrentContextSignal ? 'current_context_usage' : 'lifetime_tokens',
+    source: 'codex',
+    observedAt: new Date().toISOString(),
+    breakdown: {
+      input: inputTokens,
+      output: outputTokens,
+      cacheRead: cachedInputTokens,
+    },
+  };
 }
 
 async function readCodexConfig() {
@@ -143,6 +219,19 @@ async function resolveEffectivePermissionMode(permissionMode, workingDirectory) 
   }
 
   return permissionMode;
+}
+
+function normalizeCodexReasoningEffort(reasoningEffort) {
+  if (typeof reasoningEffort !== 'string') {
+    return null;
+  }
+
+  const normalized = reasoningEffort.trim().toLowerCase();
+  if (!normalized || !CODEX_REASONING_EFFORT_LEVELS.has(normalized)) {
+    return null;
+  }
+
+  return normalized;
 }
 
 /**
@@ -400,11 +489,13 @@ export async function queryCodex(command, options = {}, ws) {
     cwd,
     projectPath,
     model,
+    reasoningEffort,
     permissionMode = 'default',
     images,
   } = options;
 
   const workingDirectory = cwd || projectPath || process.cwd();
+  const normalizedReasoningEffort = normalizeCodexReasoningEffort(reasoningEffort);
   const effectivePermissionMode = await resolveEffectivePermissionMode(permissionMode, workingDirectory);
   const { sandboxMode, approvalPolicy } = mapPermissionModeToCodexOptions(effectivePermissionMode);
 
@@ -437,6 +528,9 @@ export async function queryCodex(command, options = {}, ws) {
   args.push('--skip-git-repo-check');
   if (approvalPolicy) {
     args.push('--config', `approval_policy="${approvalPolicy}"`);
+  }
+  if (normalizedReasoningEffort) {
+    args.push('--config', `model_reasoning_effort="${normalizedReasoningEffort}"`);
   }
   if (sessionId) {
     args.push('resume');
@@ -544,15 +638,14 @@ export async function queryCodex(command, options = {}, ws) {
       });
 
       if (event.type === 'turn.completed' && event.usage) {
-        const totalTokens = (event.usage.input_tokens || 0) + (event.usage.output_tokens || 0);
-        sendMessage(ws, {
-          type: 'token-budget',
-          data: {
-            used: totalTokens,
-            total: 200000,
-          },
-          sessionId: currentSessionId,
-        });
+        const tokenBudget = extractTokenBudgetFromCodexUsage(event.usage);
+        if (tokenBudget) {
+          sendMessage(ws, {
+            type: 'token-budget',
+            data: tokenBudget,
+            sessionId: currentSessionId,
+          });
+        }
       }
     }
 

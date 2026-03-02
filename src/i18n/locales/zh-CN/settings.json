@@ -55,6 +55,7 @@
       "appearance": "外观",
       "toolDisplay": "工具显示",
       "viewOptions": "视图选项",
+      "shellLaunch": "Shell 启动",
       "inputSettings": "输入设置",
       "whisperDictation": "Whisper 听写"
     },
@@ -65,8 +66,17 @@
     "showInjectedContext": "显示注入的 AGENTS 上下文",
     "autoScrollToBottom": "自动滚动到底部",
     "showIgnoredDirectories": "在文件面板显示被忽略目录",
+    "autoDiscoverCodexProjects": "自动发现仅存在于 Codex 的项目",
     "sendByCtrlEnter": "使用 Ctrl+Enter 发送",
     "sendByCtrlEnterDescription": "启用后，按 Ctrl+Enter 发送消息，而不是仅按 Enter。这对于使用输入法的用户可以避免意外发送。",
+    "shell": {
+      "codexModel": "Codex 模型",
+      "useSessionDefault": "使用会话/默认模型",
+      "reasoningLevel": "推理级别",
+      "extraArgs": "额外启动参数",
+      "extraArgsPlaceholder": "例如：--search --approval-mode never",
+      "appliesOnReconnect": "将在 Shell 下次连接/重连 Codex 时生效。"
+    },
     "dragHandle": {
       "dragging": "正在拖拽手柄",
       "closePanel": "关闭设置面板",

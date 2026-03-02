@@ -35,6 +35,7 @@ function ChatInterface({
   autoExpandTools,
   showRawParameters,
   showThinking,
+  showInjectedContext,
   autoScrollToBottom,
   sendByCtrlEnter,
   externalMessageUpdate,
@@ -64,6 +65,9 @@ function ChatInterface({
     setClaudeModel,
     codexModel,
     setCodexModel,
+    codexModelOptions,
+    codexReasoningEffort,
+    setCodexReasoningEffort,
     geminiModel,
     setGeminiModel,
     permissionMode,
@@ -176,6 +180,7 @@ function ChatInterface({
     cursorModel,
     claudeModel,
     codexModel,
+    codexReasoningEffort,
     geminiModel,
     isLoading,
     canAbortSession,
@@ -292,6 +297,9 @@ function ChatInterface({
           setCursorModel={setCursorModel}
           codexModel={codexModel}
           setCodexModel={setCodexModel}
+          codexModelOptions={codexModelOptions}
+          codexReasoningEffort={codexReasoningEffort}
+          setCodexReasoningEffort={setCodexReasoningEffort}
           geminiModel={geminiModel}
           setGeminiModel={setGeminiModel}
           tasksEnabled={tasksEnabled}
@@ -317,6 +325,7 @@ function ChatInterface({
           autoExpandTools={autoExpandTools}
           showRawParameters={showRawParameters}
           showThinking={showThinking}
+          showInjectedContext={showInjectedContext}
           selectedProject={selectedProject}
           isLoading={isLoading}
         />
@@ -329,6 +338,16 @@ function ChatInterface({
           isLoading={isLoading}
           onAbortSession={handleAbortSession}
           provider={provider}
+          claudeModel={claudeModel}
+          setClaudeModel={setClaudeModel}
+          cursorModel={cursorModel}
+          setCursorModel={setCursorModel}
+          codexModel={codexModel}
+          setCodexModel={setCodexModel}
+          codexReasoningEffort={codexReasoningEffort}
+          setCodexReasoningEffort={setCodexReasoningEffort}
+          geminiModel={geminiModel}
+          setGeminiModel={setGeminiModel}
           permissionMode={permissionMode}
           onModeSwitch={cyclePermissionMode}
           thinkingMode={thinkingMode}
