@@ -106,6 +106,7 @@
     "attachImages": "附加图片",
     "model": "模型",
     "changeModel": "切换下一轮使用的模型",
+    "enableModelReasoningControls": "启用模型/推理设置",
     "send": "发送",
     "stop": "停止",
     "hintText": {

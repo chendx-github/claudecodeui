@@ -61,6 +61,9 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
   const [geminiModel, setGeminiModel] = useState<string>(() => {
     return localStorage.getItem('gemini-model') || GEMINI_MODELS.DEFAULT;
   });
+  const [modelReasoningControlsEnabled, setModelReasoningControlsEnabled] = useState<boolean>(() => {
+    return localStorage.getItem('model-reasoning-controls-enabled') === 'true';
+  });
 
   const lastProviderRef = useRef(provider);
 
@@ -187,6 +190,13 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
     }
   }, [codexReasoningEffort]);
 
+  useEffect(() => {
+    localStorage.setItem(
+      'model-reasoning-controls-enabled',
+      modelReasoningControlsEnabled ? 'true' : 'false',
+    );
+  }, [modelReasoningControlsEnabled]);
+
   const cyclePermissionMode = useCallback(() => {
     const modes: PermissionMode[] =
       provider === 'codex'
@@ -215,6 +225,8 @@ export function useChatProviderState({ selectedSession }: UseChatProviderStateAr
     codexModelOptions,
     codexReasoningEffort,
     setCodexReasoningEffort,
+    modelReasoningControlsEnabled,
+    setModelReasoningControlsEnabled,
     geminiModel,
     setGeminiModel,
     permissionMode,

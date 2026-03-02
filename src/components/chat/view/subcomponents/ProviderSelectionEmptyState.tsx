@@ -27,6 +27,8 @@ interface ProviderSelectionEmptyStateProps {
   codexModelOptions: Array<{ value: string; label: string }>;
   codexReasoningEffort: string;
   setCodexReasoningEffort: (effort: string) => void;
+  modelReasoningControlsEnabled: boolean;
+  setModelReasoningControlsEnabled: (enabled: boolean) => void;
   geminiModel: string;
   setGeminiModel: (model: string) => void;
   tasksEnabled: boolean;
@@ -108,6 +110,8 @@ export default function ProviderSelectionEmptyState({
   codexModelOptions,
   codexReasoningEffort,
   setCodexReasoningEffort,
+  modelReasoningControlsEnabled,
+  setModelReasoningControlsEnabled,
   geminiModel,
   setGeminiModel,
   tasksEnabled,
@@ -194,24 +198,36 @@ export default function ProviderSelectionEmptyState({
 
           {/* Model picker — appears after provider is chosen */}
           <div className={`transition-all duration-200 ${provider ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1 pointer-events-none'}`}>
-            <div className="flex items-center justify-center gap-2 mb-5">
-              <span className="text-sm text-muted-foreground">{t('providerSelection.selectModel')}</span>
-              <div className="relative">
-                <select
-                  value={currentModel}
-                  onChange={(e) => handleModelChange(e.target.value)}
-                  tabIndex={-1}
-                  className="appearance-none pl-3 pr-7 py-1.5 text-sm font-medium bg-muted/50 border border-border/60 rounded-lg text-foreground cursor-pointer hover:bg-muted transition-colors focus:outline-none focus:ring-2 focus:ring-primary/20"
-                >
-                  {resolvedModelOptions.map(({ value, label }: { value: string; label: string }) => (
-                    <option key={value} value={value}>{label}</option>
-                  ))}
-                </select>
-                <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
-              </div>
-            </div>
+            <label className="flex items-center justify-center gap-2 mb-5 text-sm text-muted-foreground cursor-pointer">
+              <input
+                type="checkbox"
+                checked={modelReasoningControlsEnabled}
+                onChange={(event) => setModelReasoningControlsEnabled(event.target.checked)}
+                className="h-3.5 w-3.5 rounded border-border text-primary focus:ring-primary/30"
+              />
+              <span>{t('input.enableModelReasoningControls', { defaultValue: 'Enable model/reasoning controls' })}</span>
+            </label>
 
-            {provider === 'codex' && (
+            {modelReasoningControlsEnabled && (
+              <div className="flex items-center justify-center gap-2 mb-5">
+                <span className="text-sm text-muted-foreground">{t('providerSelection.selectModel')}</span>
+                <div className="relative">
+                  <select
+                    value={currentModel}
+                    onChange={(e) => handleModelChange(e.target.value)}
+                    tabIndex={-1}
+                    className="appearance-none pl-3 pr-7 py-1.5 text-sm font-medium bg-muted/50 border border-border/60 rounded-lg text-foreground cursor-pointer hover:bg-muted transition-colors focus:outline-none focus:ring-2 focus:ring-primary/20"
+                  >
+                    {resolvedModelOptions.map(({ value, label }: { value: string; label: string }) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
+                  </select>
+                  <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 w-3 h-3 text-muted-foreground pointer-events-none" />
+                </div>
+              </div>
+            )}
+
+            {modelReasoningControlsEnabled && provider === 'codex' && (
               <div className="flex items-center justify-center gap-2 mb-5">
                 <span className="text-sm text-muted-foreground">
                   {t('providerSelection.selectReasoning', { defaultValue: 'Reasoning level' })}

@@ -8,6 +8,8 @@ interface ChatInputControlsProps {
   permissionMode: PermissionMode | string;
   onModeSwitch: () => void;
   provider: Provider | string;
+  modelReasoningControlsEnabled: boolean;
+  onModelReasoningControlsEnabledChange: (enabled: boolean) => void;
   currentModel: string;
   modelOptions: Array<{ value: string; label: string }>;
   onModelChange: (model: string) => void;
@@ -30,6 +32,8 @@ export default function ChatInputControls({
   permissionMode,
   onModeSwitch,
   provider,
+  modelReasoningControlsEnabled,
+  onModelReasoningControlsEnabledChange,
   currentModel,
   modelOptions,
   onModelChange,
@@ -86,25 +90,39 @@ export default function ChatInputControls({
         </div>
       </button>
 
-      <div className="flex items-center gap-2 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg border border-border/60 bg-muted/40">
-        <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          {t('input.model', { defaultValue: 'Model' })}
+      <label className="flex items-center gap-2 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg border border-border/60 bg-muted/40 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={modelReasoningControlsEnabled}
+          onChange={(event) => onModelReasoningControlsEnabledChange(event.target.checked)}
+          className="h-3.5 w-3.5 rounded border-border text-primary focus:ring-primary/30"
+        />
+        <span className="text-xs font-medium text-muted-foreground">
+          {t('input.enableModelReasoningControls', { defaultValue: 'Enable model/reasoning controls' })}
         </span>
-        <select
-          value={currentModel}
-          onChange={(event) => onModelChange(event.target.value)}
-          className="bg-transparent text-sm font-medium text-foreground focus:outline-none min-w-[7rem]"
-          title={t('input.changeModel', { defaultValue: 'Change model for next turn' })}
-        >
-          {modelOptions.map(({ value, label }) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </select>
-      </div>
+      </label>
 
-      {provider === 'codex' && currentReasoningEffort && onReasoningChange && reasoningOptions.length > 0 && (
+      {modelReasoningControlsEnabled && (
+        <div className="flex items-center gap-2 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg border border-border/60 bg-muted/40">
+          <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            {t('input.model', { defaultValue: 'Model' })}
+          </span>
+          <select
+            value={currentModel}
+            onChange={(event) => onModelChange(event.target.value)}
+            className="bg-transparent text-sm font-medium text-foreground focus:outline-none min-w-[7rem]"
+            title={t('input.changeModel', { defaultValue: 'Change model for next turn' })}
+          >
+            {modelOptions.map(({ value, label }) => (
+              <option key={value} value={value}>
+                {label}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {modelReasoningControlsEnabled && provider === 'codex' && currentReasoningEffort && onReasoningChange && reasoningOptions.length > 0 && (
         <div className="flex items-center gap-2 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg border border-border/60 bg-muted/40">
           <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
             {t('providerSelection.selectReasoning', { defaultValue: 'Reasoning' })}

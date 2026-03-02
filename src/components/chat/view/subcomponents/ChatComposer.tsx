@@ -60,6 +60,8 @@ interface ChatComposerProps {
   setCodexModel: (model: string) => void;
   codexReasoningEffort: string;
   setCodexReasoningEffort: (effort: string) => void;
+  modelReasoningControlsEnabled: boolean;
+  setModelReasoningControlsEnabled: (enabled: boolean) => void;
   geminiModel: string;
   setGeminiModel: (model: string) => void;
   permissionMode: PermissionMode | string;
@@ -127,6 +129,8 @@ export default function ChatComposer({
   setCodexModel,
   codexReasoningEffort,
   setCodexReasoningEffort,
+  modelReasoningControlsEnabled,
+  setModelReasoningControlsEnabled,
   geminiModel,
   setGeminiModel,
   permissionMode,
@@ -274,6 +278,8 @@ export default function ChatComposer({
           permissionMode={permissionMode}
           onModeSwitch={onModeSwitch}
           provider={provider}
+          modelReasoningControlsEnabled={modelReasoningControlsEnabled}
+          onModelReasoningControlsEnabledChange={setModelReasoningControlsEnabled}
           currentModel={currentModel}
           modelOptions={modelOptions}
           onModelChange={handleModelChange}

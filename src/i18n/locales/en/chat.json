@@ -124,6 +124,7 @@
     "attachImages": "Attach images",
     "model": "Model",
     "changeModel": "Change model for next turn",
+    "enableModelReasoningControls": "Enable model/reasoning controls",
     "send": "Send",
     "stop": "Stop",
     "hintText": {

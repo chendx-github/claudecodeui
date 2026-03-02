@@ -106,6 +106,7 @@
     "attachImages": "이미지 첨부",
     "model": "모델",
     "changeModel": "다음 턴에 사용할 모델 변경",
+    "enableModelReasoningControls": "모델/추론 설정 활성화",
     "send": "전송",
     "stop": "중지",
     "hintText": {

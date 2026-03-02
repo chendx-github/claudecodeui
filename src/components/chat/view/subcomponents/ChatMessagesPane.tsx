@@ -29,6 +29,8 @@ interface ChatMessagesPaneProps {
   codexModelOptions: Array<{ value: string; label: string }>;
   codexReasoningEffort: string;
   setCodexReasoningEffort: (effort: string) => void;
+  modelReasoningControlsEnabled: boolean;
+  setModelReasoningControlsEnabled: (enabled: boolean) => void;
   geminiModel: string;
   setGeminiModel: (model: string) => void;
   tasksEnabled: boolean;
@@ -79,6 +81,8 @@ export default function ChatMessagesPane({
   codexModelOptions,
   codexReasoningEffort,
   setCodexReasoningEffort,
+  modelReasoningControlsEnabled,
+  setModelReasoningControlsEnabled,
   geminiModel,
   setGeminiModel,
   tasksEnabled,
@@ -167,6 +171,8 @@ export default function ChatMessagesPane({
           codexModelOptions={codexModelOptions}
           codexReasoningEffort={codexReasoningEffort}
           setCodexReasoningEffort={setCodexReasoningEffort}
+          modelReasoningControlsEnabled={modelReasoningControlsEnabled}
+          setModelReasoningControlsEnabled={setModelReasoningControlsEnabled}
           geminiModel={geminiModel}
           setGeminiModel={setGeminiModel}
           tasksEnabled={tasksEnabled}

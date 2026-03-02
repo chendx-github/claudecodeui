@@ -43,6 +43,7 @@ interface UseChatComposerStateArgs {
   claudeModel: string;
   codexModel: string;
   codexReasoningEffort: string;
+  modelReasoningControlsEnabled: boolean;
   geminiModel: string;
   isLoading: boolean;
   canAbortSession: boolean;
@@ -97,6 +98,7 @@ export function useChatComposerState({
   claudeModel,
   codexModel,
   codexReasoningEffort,
+  modelReasoningControlsEnabled,
   geminiModel,
   isLoading,
   canAbortSession,
@@ -619,7 +621,7 @@ export function useChatComposerState({
             projectPath: resolvedProjectPath,
             sessionId: effectiveSessionId,
             resume: Boolean(effectiveSessionId),
-            model: cursorModel,
+            model: modelReasoningControlsEnabled ? cursorModel : undefined,
             skipPermissions: toolsSettings?.skipPermissions || false,
             toolsSettings,
           },
@@ -634,8 +636,8 @@ export function useChatComposerState({
             projectPath: resolvedProjectPath,
             sessionId: effectiveSessionId,
             resume: Boolean(effectiveSessionId),
-            model: codexModel,
-            reasoningEffort: codexReasoningEffort,
+            model: modelReasoningControlsEnabled ? codexModel : undefined,
+            reasoningEffort: modelReasoningControlsEnabled ? codexReasoningEffort : undefined,
             permissionMode: permissionMode === 'plan' ? 'default' : permissionMode,
           },
         });
@@ -649,7 +651,7 @@ export function useChatComposerState({
             projectPath: resolvedProjectPath,
             sessionId: effectiveSessionId,
             resume: Boolean(effectiveSessionId),
-            model: geminiModel,
+            model: modelReasoningControlsEnabled ? geminiModel : undefined,
             permissionMode,
             toolsSettings,
           },
@@ -665,7 +667,7 @@ export function useChatComposerState({
             resume: Boolean(effectiveSessionId),
             toolsSettings,
             permissionMode,
-            model: claudeModel,
+            model: modelReasoningControlsEnabled ? claudeModel : undefined,
             images: uploadedImages,
           },
         });
@@ -691,6 +693,7 @@ export function useChatComposerState({
       claudeModel,
       codexModel,
       codexReasoningEffort,
+      modelReasoningControlsEnabled,
       currentSessionId,
       cursorModel,
       executeCommand,

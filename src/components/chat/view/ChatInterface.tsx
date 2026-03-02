@@ -68,6 +68,8 @@ function ChatInterface({
     codexModelOptions,
     codexReasoningEffort,
     setCodexReasoningEffort,
+    modelReasoningControlsEnabled,
+    setModelReasoningControlsEnabled,
     geminiModel,
     setGeminiModel,
     permissionMode,
@@ -181,6 +183,7 @@ function ChatInterface({
     claudeModel,
     codexModel,
     codexReasoningEffort,
+    modelReasoningControlsEnabled,
     geminiModel,
     isLoading,
     canAbortSession,
@@ -300,6 +303,8 @@ function ChatInterface({
           codexModelOptions={codexModelOptions}
           codexReasoningEffort={codexReasoningEffort}
           setCodexReasoningEffort={setCodexReasoningEffort}
+          modelReasoningControlsEnabled={modelReasoningControlsEnabled}
+          setModelReasoningControlsEnabled={setModelReasoningControlsEnabled}
           geminiModel={geminiModel}
           setGeminiModel={setGeminiModel}
           tasksEnabled={tasksEnabled}
@@ -346,6 +351,8 @@ function ChatInterface({
           setCodexModel={setCodexModel}
           codexReasoningEffort={codexReasoningEffort}
           setCodexReasoningEffort={setCodexReasoningEffort}
+          modelReasoningControlsEnabled={modelReasoningControlsEnabled}
+          setModelReasoningControlsEnabled={setModelReasoningControlsEnabled}
           geminiModel={geminiModel}
           setGeminiModel={setGeminiModel}
           permissionMode={permissionMode}

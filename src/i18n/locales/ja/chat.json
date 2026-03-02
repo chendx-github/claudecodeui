@@ -105,6 +105,7 @@
     "attachImages": "画像を添付",
     "model": "モデル",
     "changeModel": "次のターンのモデルを変更",
+    "enableModelReasoningControls": "モデル/推論設定を有効化",
     "send": "送信",
     "stop": "停止",
     "hintText": {
