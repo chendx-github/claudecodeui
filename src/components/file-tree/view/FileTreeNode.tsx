@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { ChevronRight, Folder, FolderOpen } from 'lucide-react';
 import { cn } from '../../../lib/utils';
+import { useTranslation } from 'react-i18next';
 import type { FileTreeNode as FileTreeNodeType, FileTreeViewMode } from '../types/types';
 
 type FileTreeNodeProps = {
@@ -8,7 +9,10 @@ type FileTreeNodeProps = {
   level: number;
   viewMode: FileTreeViewMode;
   expandedDirs: Set<string>;
+  loadedDirs: Set<string>;
+  loadingDirs: Set<string>;
   onItemClick: (item: FileTreeNodeType) => void;
+  renderItemActions: (item: FileTreeNodeType) => ReactNode;
   renderFileIcon: (filename: string) => ReactNode;
   formatFileSize: (bytes?: number) => string;
   formatRelativeTime: (date?: string) => string;
@@ -47,14 +51,20 @@ export default function FileTreeNode({
   level,
   viewMode,
   expandedDirs,
+  loadedDirs,
+  loadingDirs,
   onItemClick,
+  renderItemActions,
   renderFileIcon,
   formatFileSize,
   formatRelativeTime,
 }: FileTreeNodeProps) {
+  const { t } = useTranslation();
   const isDirectory = item.type === 'directory';
   const isOpen = isDirectory && expandedDirs.has(item.path);
   const hasChildren = Boolean(isDirectory && item.children && item.children.length > 0);
+  const isLoadingChildren = isDirectory && loadingDirs.has(item.path);
+  const hasLoadedChildren = isDirectory && loadedDirs.has(item.path);
 
   const nameClassName = cn(
     'text-[13px] leading-tight truncate',
@@ -65,9 +75,7 @@ export default function FileTreeNode({
   const rowClassName = cn(
     viewMode === 'detailed'
       ? 'group grid grid-cols-12 gap-2 py-[3px] pr-2 hover:bg-accent/60 cursor-pointer items-center rounded-sm transition-colors duration-100'
-      : viewMode === 'compact'
-      ? 'group flex items-center justify-between py-[3px] pr-2 hover:bg-accent/60 cursor-pointer rounded-sm transition-colors duration-100'
-      : 'group flex items-center gap-1.5 py-[3px] pr-2 cursor-pointer rounded-sm hover:bg-accent/60 transition-colors duration-100',
+      : 'group flex items-center justify-between py-[3px] pr-2 hover:bg-accent/60 cursor-pointer rounded-sm transition-colors duration-100',
     isDirectory && isOpen && 'border-l-2 border-primary/30',
     (isDirectory && !isOpen) || !isDirectory ? 'border-l-2 border-transparent' : '',
   );
@@ -89,11 +97,14 @@ export default function FileTreeNode({
               {item.type === 'file' ? formatFileSize(item.size) : ''}
             </div>
             <div className="col-span-3 text-sm text-muted-foreground">{formatRelativeTime(item.modified)}</div>
-            <div className="col-span-2 text-sm text-muted-foreground font-mono">{item.permissionsRwx || ''}</div>
+            <div className="col-span-2 flex items-center justify-between gap-1.5 min-w-0">
+              <span className="text-sm text-muted-foreground font-mono truncate">{item.permissionsRwx || ''}</span>
+              {renderItemActions(item)}
+            </div>
           </>
         ) : viewMode === 'compact' ? (
           <>
-            <div className="flex items-center gap-1.5 min-w-0">
+            <div className="flex items-center gap-1.5 min-w-0 flex-1">
               <TreeItemIcon item={item} isOpen={isOpen} renderFileIcon={renderFileIcon} />
               <span className={nameClassName}>{item.name}</span>
             </div>
@@ -104,36 +115,56 @@ export default function FileTreeNode({
                   <span className="font-mono">{item.permissionsRwx}</span>
                 </>
               )}
+              {renderItemActions(item)}
             </div>
           </>
         ) : (
           <>
-            <TreeItemIcon item={item} isOpen={isOpen} renderFileIcon={renderFileIcon} />
-            <span className={nameClassName}>{item.name}</span>
+            <div className="flex items-center gap-1.5 min-w-0 flex-1">
+              <TreeItemIcon item={item} isOpen={isOpen} renderFileIcon={renderFileIcon} />
+              <span className={nameClassName}>{item.name}</span>
+            </div>
+            {renderItemActions(item)}
           </>
         )}
       </div>
 
-      {isDirectory && isOpen && hasChildren && (
+      {isDirectory && isOpen && (
         <div className="relative">
           <span
             className="absolute top-0 bottom-0 border-l border-border/40"
             style={{ left: `${level * 16 + 14}px` }}
             aria-hidden="true"
           />
-          {item.children?.map((child) => (
+          {isLoadingChildren && (
+            <div className="py-[3px] text-xs text-muted-foreground" style={{ paddingLeft: `${(level + 1) * 16 + 4}px` }}>
+              {t('fileTree.loading')}
+            </div>
+          )}
+          {!isLoadingChildren && hasChildren && item.children?.map((child) => (
             <FileTreeNode
               key={child.path}
               item={child}
               level={level + 1}
               viewMode={viewMode}
               expandedDirs={expandedDirs}
+              loadedDirs={loadedDirs}
+              loadingDirs={loadingDirs}
               onItemClick={onItemClick}
+              renderItemActions={renderItemActions}
               renderFileIcon={renderFileIcon}
               formatFileSize={formatFileSize}
               formatRelativeTime={formatRelativeTime}
             />
           ))}
+          {!isLoadingChildren && !hasChildren && hasLoadedChildren && (
+            <span
+              className="block py-[3px] text-xs text-muted-foreground"
+              style={{ paddingLeft: `${(level + 1) * 16 + 4}px` }}
+            >
+              {t('fileTree.noFilesFound')}
+            </span>
+          )}
         </div>
       )}
     </div>

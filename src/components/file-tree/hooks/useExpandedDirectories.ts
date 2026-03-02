@@ -3,7 +3,7 @@ import { useCallback, useState } from 'react';
 type UseExpandedDirectoriesResult = {
   expandedDirs: Set<string>;
   toggleDirectory: (path: string) => void;
-  expandDirectories: (paths: string[]) => void;
+  resetExpandedDirectories: () => void;
 };
 
 export function useExpandedDirectories(): UseExpandedDirectoriesResult {
@@ -23,22 +23,13 @@ export function useExpandedDirectories(): UseExpandedDirectoriesResult {
     });
   }, []);
 
-  const expandDirectories = useCallback((paths: string[]) => {
-    if (paths.length === 0) {
-      return;
-    }
-
-    setExpandedDirs((previous) => {
-      const next = new Set(previous);
-      paths.forEach((path) => next.add(path));
-      return next;
-    });
+  const resetExpandedDirectories = useCallback(() => {
+    setExpandedDirs(new Set());
   }, []);
 
   return {
     expandedDirs,
     toggleDirectory,
-    expandDirectories,
+    resetExpandedDirectories,
   };
 }
-

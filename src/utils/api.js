@@ -132,6 +132,11 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ filePath, content }),
     }),
+  /**
+   * @param {string} projectName
+   * @param {string | null | undefined} [directoryPath]
+   * @param {{ includeIgnored?: boolean, showHidden?: boolean } & RequestInit} [options]
+   */
   listFiles: (projectName, directoryPath = null, options = {}) => {
     const {
       includeIgnored,
@@ -153,6 +158,11 @@ export const api = {
       fetchOptions,
     );
   },
+  /**
+   * @param {string} projectName
+   * @param {string} query
+   * @param {{ limit?: number, type?: string, showHidden?: boolean, includeIgnored?: boolean } & RequestInit} [options]
+   */
   searchFiles: (projectName, query, options = {}) => {
     const {
       limit,

@@ -8,6 +8,7 @@ export interface FileTreeNode {
   name: string;
   type: FileTreeItemType;
   path: string;
+  relativePath?: string;
   size?: number;
   modified?: string;
   permissionsRwx?: string;
