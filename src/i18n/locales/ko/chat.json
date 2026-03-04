@@ -107,6 +107,12 @@
     "model": "모델",
     "changeModel": "다음 턴에 사용할 모델 변경",
     "enableModelReasoningControls": "모델/추론 설정 활성화",
+    "launchCommand": "CLI",
+    "generatingLaunchCommand": "생성 중...",
+    "launchCommandUnavailable": "사용 불가",
+    "refreshLaunchCommand": "명령 새로고침",
+    "copyLaunchCommand": "명령 복사",
+    "launchCommandCopied": "복사됨",
     "send": "전송",
     "stop": "중지",
     "hintText": {

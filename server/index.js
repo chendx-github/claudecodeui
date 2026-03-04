@@ -476,6 +476,25 @@ function joinPosixCommand(commandArgs = []) {
     return renderedArgs ? `${safeCommand} ${renderedArgs}` : safeCommand;
 }
 
+function joinPosixCommandAllowFlags(commandArgs = []) {
+    if (!Array.isArray(commandArgs) || commandArgs.length === 0) {
+        return '';
+    }
+
+    const [command, ...args] = commandArgs;
+    const safeCommand = /^[A-Za-z0-9._/-]+$/.test(command) ? command : escapePosixShellArg(command);
+    const renderedArgs = args
+        .map((arg) => {
+            const value = String(arg);
+            if (/^--[A-Za-z0-9][A-Za-z0-9-]*$/.test(value)) {
+                return value;
+            }
+            return escapePosixShellArg(value);
+        })
+        .join(' ');
+    return renderedArgs ? `${safeCommand} ${renderedArgs}` : safeCommand;
+}
+
 function joinPowerShellCommand(commandArgs = []) {
     if (!Array.isArray(commandArgs) || commandArgs.length === 0) {
         return '';
@@ -505,6 +524,115 @@ function buildCodexCommandArgs({ sessionId = null, model = '', reasoningEffort =
     }
 
     return ['codex', ...baseArgs];
+}
+
+function ensureCodexYoloArg(extraArgs = []) {
+    const normalizedArgs = Array.isArray(extraArgs)
+        ? extraArgs.filter((arg) => typeof arg === 'string' && arg.trim() && arg.trim() !== '--yolo')
+        : [];
+    return [...normalizedArgs, '--yolo'];
+}
+
+function sanitizeLaunchSessionId(rawSessionId) {
+    if (typeof rawSessionId !== 'string') {
+        return null;
+    }
+
+    const trimmed = rawSessionId.trim();
+    if (!trimmed || trimmed.startsWith('new-session-')) {
+        return null;
+    }
+
+    return trimmed;
+}
+
+function buildProviderLaunchCommands({
+    provider = 'codex',
+    projectPath = process.cwd(),
+    sessionId = null,
+    model = '',
+    reasoningEffort = '',
+    extraArgs = [],
+} = {}) {
+    const normalizedProvider = typeof provider === 'string' ? provider.trim().toLowerCase() : 'codex';
+    const normalizedSessionId = sanitizeLaunchSessionId(sessionId);
+    const safeProjectPath = projectPath || process.cwd();
+
+    if (normalizedProvider === 'codex') {
+        const codexExtraArgs = ensureCodexYoloArg(extraArgs);
+        const codexStartArgs = buildCodexCommandArgs({
+            model,
+            reasoningEffort,
+            extraArgs: codexExtraArgs,
+        });
+        const codexResumeArgs = normalizedSessionId
+            ? ['codex', 'resume', normalizedSessionId, ...codexStartArgs.slice(1)]
+            : null;
+
+        const startBash = joinPosixCommandAllowFlags(codexStartArgs);
+        const startPowerShell = joinPowerShellCommand(codexStartArgs);
+
+        return {
+            bash: codexResumeArgs
+                ? `cd ${escapePosixShellArg(safeProjectPath)} && ${joinPosixCommandAllowFlags(codexResumeArgs)}`
+                : `cd ${escapePosixShellArg(safeProjectPath)} && ${startBash}`,
+            powershell: codexResumeArgs
+                ? `Set-Location -Path ${escapePowerShellArg(safeProjectPath)}; ${joinPowerShellCommand(codexResumeArgs)}`
+                : `Set-Location -Path ${escapePowerShellArg(safeProjectPath)}; ${startPowerShell}`,
+        };
+    }
+
+    if (normalizedProvider === 'cursor') {
+        const cursorStartArgs = ['cursor-agent'];
+        const cursorResumeArgs = normalizedSessionId
+            ? ['cursor-agent', `--resume=${normalizedSessionId}`]
+            : null;
+
+        const startBash = joinPosixCommand(cursorStartArgs);
+        const startPowerShell = joinPowerShellCommand(cursorStartArgs);
+
+        return {
+            bash: cursorResumeArgs
+                ? `cd ${escapePosixShellArg(safeProjectPath)} && ${joinPosixCommand(cursorResumeArgs)} || ${startBash}`
+                : `cd ${escapePosixShellArg(safeProjectPath)} && ${startBash}`,
+            powershell: cursorResumeArgs
+                ? `Set-Location -Path ${escapePowerShellArg(safeProjectPath)}; ${joinPowerShellCommand(cursorResumeArgs)}; if ($LASTEXITCODE -ne 0) { ${startPowerShell} }`
+                : `Set-Location -Path ${escapePowerShellArg(safeProjectPath)}; ${startPowerShell}`,
+        };
+    }
+
+    if (normalizedProvider === 'gemini') {
+        const geminiStartArgs = ['gemini'];
+        const geminiResumeArgs = normalizedSessionId
+            ? ['gemini', '--resume', normalizedSessionId]
+            : null;
+
+        const startBash = joinPosixCommand(geminiStartArgs);
+        const startPowerShell = joinPowerShellCommand(geminiStartArgs);
+
+        return {
+            bash: geminiResumeArgs
+                ? `cd ${escapePosixShellArg(safeProjectPath)} && ${joinPosixCommand(geminiResumeArgs)} || ${startBash}`
+                : `cd ${escapePosixShellArg(safeProjectPath)} && ${startBash}`,
+            powershell: geminiResumeArgs
+                ? `Set-Location -Path ${escapePowerShellArg(safeProjectPath)}; ${joinPowerShellCommand(geminiResumeArgs)}; if ($LASTEXITCODE -ne 0) { ${startPowerShell} }`
+                : `Set-Location -Path ${escapePowerShellArg(safeProjectPath)}; ${startPowerShell}`,
+        };
+    }
+
+    const claudeStartArgs = ['claude'];
+    const claudeResumeArgs = normalizedSessionId ? ['claude', '--resume', normalizedSessionId] : null;
+    const startBash = joinPosixCommand(claudeStartArgs);
+    const startPowerShell = joinPowerShellCommand(claudeStartArgs);
+
+    return {
+        bash: claudeResumeArgs
+            ? `cd ${escapePosixShellArg(safeProjectPath)} && ${joinPosixCommand(claudeResumeArgs)} || ${startBash}`
+            : `cd ${escapePosixShellArg(safeProjectPath)} && ${startBash}`,
+        powershell: claudeResumeArgs
+            ? `Set-Location -Path ${escapePowerShellArg(safeProjectPath)}; ${joinPowerShellCommand(claudeResumeArgs)}; if ($LASTEXITCODE -ne 0) { ${startPowerShell} }`
+            : `Set-Location -Path ${escapePowerShellArg(safeProjectPath)}; ${startPowerShell}`,
+    };
 }
 
 // Single WebSocket server that handles both paths
@@ -1292,6 +1420,53 @@ app.get('/api/projects/:projectName/files', authenticateToken, async (req, res) 
     } catch (error) {
         console.error('[ERROR] File tree error:', error.message);
         res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/projects/:projectName/cli-launch-command', authenticateToken, async (req, res) => {
+    try {
+        const providerInput = typeof req.body?.provider === 'string' ? req.body.provider.trim().toLowerCase() : 'codex';
+        const provider = ['claude', 'cursor', 'codex', 'gemini'].includes(providerInput)
+            ? providerInput
+            : 'codex';
+        const sessionId = sanitizeLaunchSessionId(req.body?.sessionId);
+        const projectPath = await resolveProjectRootPath(req.params.projectName);
+
+        const model = provider === 'codex' ? sanitizeShellModel(req.body?.model) : '';
+        const reasoningEffort = provider === 'codex' ? sanitizeShellReasoning(req.body?.reasoningEffort) : '';
+        const extraArgs = provider === 'codex' ? parseShellExtraArgs(req.body?.extraArgs) : [];
+
+        const commands = buildProviderLaunchCommands({
+            provider,
+            projectPath,
+            sessionId,
+            model,
+            reasoningEffort,
+            extraArgs,
+        });
+
+        res.json({
+            success: true,
+            provider,
+            projectPath,
+            sessionId,
+            command: commands.bash,
+            commands,
+            metadata: {
+                model: model || null,
+                reasoningEffort: reasoningEffort || null,
+                extraArgs,
+            },
+        });
+    } catch (error) {
+        console.error('[ERROR] Failed to generate CLI launch command:', error);
+        if (error.message === 'Path must be under project root') {
+            return res.status(403).json({ error: error.message });
+        }
+        if (error.code === 'ENOENT') {
+            return res.status(404).json({ error: 'Project path not found' });
+        }
+        return res.status(500).json({ error: error.message });
     }
 });
 

@@ -106,6 +106,12 @@
     "model": "モデル",
     "changeModel": "次のターンのモデルを変更",
     "enableModelReasoningControls": "モデル/推論設定を有効化",
+    "launchCommand": "CLI",
+    "generatingLaunchCommand": "生成中...",
+    "launchCommandUnavailable": "利用不可",
+    "refreshLaunchCommand": "コマンドを更新",
+    "copyLaunchCommand": "コマンドをコピー",
+    "launchCommandCopied": "コピー済み",
     "send": "送信",
     "stop": "停止",
     "hintText": {

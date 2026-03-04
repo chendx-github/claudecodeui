@@ -226,6 +226,12 @@ export const api = {
       },
     });
   },
+  getCliLaunchCommand: (projectName, payload = {}, options = {}) =>
+    authenticatedFetch(`/api/projects/${projectName}/cli-launch-command`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+      ...options,
+    }),
   getFiles: (projectName, options = {}) =>
     authenticatedFetch(`/api/projects/${projectName}/files`, options),
   transcribe: (formData) =>

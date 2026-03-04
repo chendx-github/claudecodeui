@@ -125,6 +125,12 @@
     "model": "Model",
     "changeModel": "Change model for next turn",
     "enableModelReasoningControls": "Enable model/reasoning controls",
+    "launchCommand": "CLI",
+    "generatingLaunchCommand": "Generating...",
+    "launchCommandUnavailable": "Unavailable",
+    "refreshLaunchCommand": "Refresh command",
+    "copyLaunchCommand": "Copy command",
+    "launchCommandCopied": "Copied",
     "send": "Send",
     "stop": "Stop",
     "hintText": {

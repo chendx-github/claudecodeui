@@ -107,6 +107,12 @@
     "model": "模型",
     "changeModel": "切换下一轮使用的模型",
     "enableModelReasoningControls": "启用模型/推理设置",
+    "launchCommand": "CLI",
+    "generatingLaunchCommand": "生成中...",
+    "launchCommandUnavailable": "不可用",
+    "refreshLaunchCommand": "刷新命令",
+    "copyLaunchCommand": "复制命令",
+    "launchCommandCopied": "已复制",
     "send": "发送",
     "stop": "停止",
     "hintText": {

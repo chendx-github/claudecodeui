@@ -1,10 +1,12 @@
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import QuickSettingsPanel from '../../QuickSettingsPanel';
 import { useTasksSettings } from '../../../contexts/TasksSettingsContext';
 import { useTranslation } from 'react-i18next';
 import ChatMessagesPane from './subcomponents/ChatMessagesPane';
 import ChatComposer from './subcomponents/ChatComposer';
 import type { ChatInterfaceProps } from '../types/types';
+import { api } from '../../../utils/api';
+import { copyTextToClipboard } from '../../../utils/clipboard';
 import { useChatProviderState } from '../hooks/useChatProviderState';
 import { useChatSessionState } from '../hooks/useChatSessionState';
 import { useChatRealtimeHandlers } from '../hooks/useChatRealtimeHandlers';
@@ -15,6 +17,10 @@ type PendingViewSession = {
   sessionId: string | null;
   startedAt: number;
 };
+
+function isLaunchableSessionId(sessionId: string | null | undefined): sessionId is string {
+  return Boolean(sessionId && !sessionId.startsWith('new-session-'));
+}
 
 function ChatInterface({
   selectedProject,
@@ -47,6 +53,12 @@ function ChatInterface({
   const streamBufferRef = useRef('');
   const streamTimerRef = useRef<number | null>(null);
   const pendingViewSessionRef = useRef<PendingViewSession | null>(null);
+  const launchCommandRequestRef = useRef(0);
+  const copiedResetTimerRef = useRef<number | null>(null);
+
+  const [launchCommand, setLaunchCommand] = useState('');
+  const [isLaunchCommandLoading, setIsLaunchCommandLoading] = useState(false);
+  const [isLaunchCommandCopied, setIsLaunchCommandCopied] = useState(false);
 
   const resetStreamingState = useCallback(() => {
     if (streamTimerRef.current) {
@@ -230,6 +242,126 @@ function ChatInterface({
     onNavigateToSession,
   });
 
+  const getModelForProvider = useCallback(() => {
+    if (provider === 'claude') {
+      return claudeModel;
+    }
+    if (provider === 'codex') {
+      return codexModel;
+    }
+    if (provider === 'gemini') {
+      return geminiModel;
+    }
+    return cursorModel;
+  }, [provider, claudeModel, codexModel, geminiModel, cursorModel]);
+
+  const refreshLaunchCommand = useCallback(async () => {
+    const projectName = selectedProject?.name;
+    if (!projectName) {
+      setLaunchCommand('');
+      setIsLaunchCommandLoading(false);
+      return;
+    }
+
+    const requestId = launchCommandRequestRef.current + 1;
+    launchCommandRequestRef.current = requestId;
+    setIsLaunchCommandLoading(true);
+
+    const payload: Record<string, unknown> = {
+      provider,
+    };
+
+    const resolvedSessionId = isLaunchableSessionId(selectedSession?.id)
+      ? selectedSession.id
+      : isLaunchableSessionId(currentSessionId)
+        ? currentSessionId
+        : null;
+
+    if (resolvedSessionId) {
+      payload.sessionId = resolvedSessionId;
+    }
+
+    if (modelReasoningControlsEnabled) {
+      const model = getModelForProvider();
+      if (model) {
+        payload.model = model;
+      }
+
+      if (provider === 'codex' && codexReasoningEffort?.trim()) {
+        payload.reasoningEffort = codexReasoningEffort.trim();
+      }
+    }
+
+    if (provider === 'codex') {
+      const extraArgs = (localStorage.getItem('shell-codex-extra-args') || '').trim();
+      if (extraArgs) {
+        payload.extraArgs = extraArgs;
+      }
+    }
+
+    try {
+      const response = await api.getCliLaunchCommand(projectName, payload);
+      const data = await response.json().catch(() => null);
+
+      if (launchCommandRequestRef.current !== requestId) {
+        return;
+      }
+
+      if (!response.ok || !data?.success || typeof data.command !== 'string') {
+        setLaunchCommand('');
+        return;
+      }
+
+      setLaunchCommand(data.command);
+    } catch (error) {
+      if (launchCommandRequestRef.current !== requestId) {
+        return;
+      }
+      console.error('[ChatInterface] Failed to load CLI launch command:', error);
+      setLaunchCommand('');
+    } finally {
+      if (launchCommandRequestRef.current === requestId) {
+        setIsLaunchCommandLoading(false);
+      }
+    }
+  }, [
+    selectedProject?.name,
+    provider,
+    selectedSession?.id,
+    currentSessionId,
+    modelReasoningControlsEnabled,
+    codexReasoningEffort,
+    getModelForProvider,
+  ]);
+
+  const handleCopyLaunchCommand = useCallback(async () => {
+    if (!launchCommand || isLaunchCommandLoading) {
+      return;
+    }
+
+    const copied = await copyTextToClipboard(launchCommand);
+    if (!copied) {
+      return;
+    }
+
+    setIsLaunchCommandCopied(true);
+    if (copiedResetTimerRef.current) {
+      window.clearTimeout(copiedResetTimerRef.current);
+    }
+    copiedResetTimerRef.current = window.setTimeout(() => {
+      setIsLaunchCommandCopied(false);
+      copiedResetTimerRef.current = null;
+    }, 1800);
+  }, [isLaunchCommandLoading, launchCommand]);
+
+  useEffect(() => {
+    refreshLaunchCommand();
+  }, [refreshLaunchCommand]);
+
+  useEffect(() => {
+    setIsLaunchCommandCopied(false);
+  }, [launchCommand]);
+
   useEffect(() => {
     if (!isLoading || !canAbortSession) {
       return;
@@ -253,6 +385,9 @@ function ChatInterface({
   useEffect(() => {
     return () => {
       resetStreamingState();
+      if (copiedResetTimerRef.current) {
+        clearTimeout(copiedResetTimerRef.current);
+      }
     };
   }, [resetStreamingState]);
 
@@ -367,6 +502,11 @@ function ChatInterface({
           isUserScrolledUp={isUserScrolledUp}
           hasMessages={chatMessages.length > 0}
           onScrollToBottom={scrollToBottomAndReset}
+          launchCommand={launchCommand}
+          isLaunchCommandLoading={isLaunchCommandLoading}
+          isLaunchCommandCopied={isLaunchCommandCopied}
+          onRefreshLaunchCommand={refreshLaunchCommand}
+          onCopyLaunchCommand={handleCopyLaunchCommand}
           onSubmit={handleSubmit}
           isDragActive={isDragActive}
           attachedImages={attachedImages}

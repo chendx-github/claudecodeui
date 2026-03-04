@@ -76,6 +76,11 @@ interface ChatComposerProps {
   isUserScrolledUp: boolean;
   hasMessages: boolean;
   onScrollToBottom: () => void;
+  launchCommand: string;
+  isLaunchCommandLoading: boolean;
+  isLaunchCommandCopied: boolean;
+  onRefreshLaunchCommand: () => void;
+  onCopyLaunchCommand: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement> | MouseEvent<HTMLButtonElement> | TouchEvent<HTMLButtonElement>) => void;
   isDragActive: boolean;
   attachedImages: File[];
@@ -145,6 +150,11 @@ export default function ChatComposer({
   isUserScrolledUp,
   hasMessages,
   onScrollToBottom,
+  launchCommand,
+  isLaunchCommandLoading,
+  isLaunchCommandCopied,
+  onRefreshLaunchCommand,
+  onCopyLaunchCommand,
   onSubmit,
   isDragActive,
   attachedImages,
@@ -296,6 +306,11 @@ export default function ChatComposer({
           isUserScrolledUp={isUserScrolledUp}
           hasMessages={hasMessages}
           onScrollToBottom={onScrollToBottom}
+          launchCommand={launchCommand}
+          isLaunchCommandLoading={isLaunchCommandLoading}
+          isLaunchCommandCopied={isLaunchCommandCopied}
+          onRefreshLaunchCommand={onRefreshLaunchCommand}
+          onCopyLaunchCommand={onCopyLaunchCommand}
         />}
       </div>
 

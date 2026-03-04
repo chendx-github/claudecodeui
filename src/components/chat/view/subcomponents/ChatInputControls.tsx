@@ -26,6 +26,11 @@ interface ChatInputControlsProps {
   isUserScrolledUp: boolean;
   hasMessages: boolean;
   onScrollToBottom: () => void;
+  launchCommand: string;
+  isLaunchCommandLoading: boolean;
+  isLaunchCommandCopied: boolean;
+  onRefreshLaunchCommand: () => void;
+  onCopyLaunchCommand: () => void;
 }
 
 export default function ChatInputControls({
@@ -50,6 +55,11 @@ export default function ChatInputControls({
   isUserScrolledUp,
   hasMessages,
   onScrollToBottom,
+  launchCommand,
+  isLaunchCommandLoading,
+  isLaunchCommandCopied,
+  onRefreshLaunchCommand,
+  onCopyLaunchCommand,
 }: ChatInputControlsProps) {
   const { t } = useTranslation('chat');
 
@@ -145,6 +155,51 @@ export default function ChatInputControls({
       {provider === 'claude' && (
         <ThinkingModeSelector selectedMode={thinkingMode} onModeChange={setThinkingMode} onClose={() => {}} className="" />
       )}
+
+      <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg border border-border/60 bg-muted/40 max-w-full">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {t('input.launchCommand', { defaultValue: 'CLI' })}
+        </span>
+        <code
+          className="text-[11px] font-mono text-foreground/85 truncate max-w-[12rem] sm:max-w-[22rem]"
+          title={launchCommand || t('input.launchCommandUnavailable', { defaultValue: 'Unavailable' })}
+        >
+          {isLaunchCommandLoading
+            ? t('input.generatingLaunchCommand', { defaultValue: 'Generating...' })
+            : launchCommand || t('input.launchCommandUnavailable', { defaultValue: 'Unavailable' })}
+        </code>
+        <button
+          type="button"
+          onClick={onRefreshLaunchCommand}
+          disabled={isLaunchCommandLoading}
+          className="w-6 h-6 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          title={t('input.refreshLaunchCommand', { defaultValue: 'Refresh command' })}
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h5M20 20v-5h-5M5 14a7 7 0 0012 2m2-6A7 7 0 007 8" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          onClick={onCopyLaunchCommand}
+          disabled={!launchCommand || isLaunchCommandLoading}
+          className="w-6 h-6 rounded-md flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          title={isLaunchCommandCopied
+            ? t('input.launchCommandCopied', { defaultValue: 'Copied' })
+            : t('input.copyLaunchCommand', { defaultValue: 'Copy command' })}
+        >
+          {isLaunchCommandCopied ? (
+            <svg className="w-3.5 h-3.5" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+            </svg>
+          ) : (
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"></path>
+            </svg>
+          )}
+        </button>
+      </div>
 
       <TokenUsagePie
         used={typeof tokenBudget?.used === 'number' ? tokenBudget.used : null}
