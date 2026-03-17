@@ -271,9 +271,11 @@ function ChatInterface({
       provider,
     };
 
+    const shouldReuseRuntimeSessionId =
+      Boolean(selectedSession?.id) || chatMessages.length > 0 || isLoading;
     const resolvedSessionId = isLaunchableSessionId(selectedSession?.id)
       ? selectedSession.id
-      : isLaunchableSessionId(currentSessionId)
+      : shouldReuseRuntimeSessionId && isLaunchableSessionId(currentSessionId)
         ? currentSessionId
         : null;
 
@@ -329,6 +331,8 @@ function ChatInterface({
     provider,
     selectedSession?.id,
     currentSessionId,
+    chatMessages.length,
+    isLoading,
     modelReasoningControlsEnabled,
     codexReasoningEffort,
     getModelForProvider,

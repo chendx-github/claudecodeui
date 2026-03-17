@@ -135,8 +135,66 @@ export function useChatSessionState({
   const scrollPositionRef = useRef({ height: 0, top: 0 });
   const loadAllFinishedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadAllOverlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const previousSelectedSessionIdRef = useRef<string | null>(selectedSession?.id || null);
 
   const createDiff = useMemo<DiffCalculator>(() => createCachedDiffCalculator(), []);
+
+  const resetSessionViewState = useCallback(
+    (options: { clearCachedMessages?: boolean; clearPendingSession?: boolean } = {}) => {
+      resetStreamingState();
+      pendingViewSessionRef.current = null;
+      setChatMessages([]);
+      setSessionMessages([]);
+      setClaudeStatus(null);
+      setCanAbortSession(false);
+      setIsLoading(false);
+      setCurrentSessionId(null);
+      messagesOffsetRef.current = 0;
+      setHasMoreMessages(false);
+      setTotalMessages(0);
+      setVisibleMessageCount(INITIAL_VISIBLE_MESSAGES);
+      setAllMessagesLoaded(false);
+      allMessagesLoadedRef.current = false;
+      setIsLoadingAllMessages(false);
+      setLoadAllJustFinished(false);
+      setShowLoadAllOverlay(false);
+      setTokenBudget(null);
+
+      if (loadAllOverlayTimerRef.current) clearTimeout(loadAllOverlayTimerRef.current);
+      if (loadAllFinishedTimerRef.current) clearTimeout(loadAllFinishedTimerRef.current);
+
+      if (typeof window !== 'undefined') {
+        sessionStorage.removeItem('cursorSessionId');
+        if (options.clearPendingSession) {
+          sessionStorage.removeItem('pendingSessionId');
+        }
+      }
+
+      if (options.clearCachedMessages && selectedProject?.name) {
+        safeLocalStorage.removeItem(`chat_messages_${selectedProject.name}`);
+      }
+    },
+    [pendingViewSessionRef, resetStreamingState, selectedProject?.name],
+  );
+
+  useLayoutEffect(() => {
+    const previousSelectedSessionId = previousSelectedSessionIdRef.current;
+    const nextSelectedSessionId = selectedSession?.id || null;
+
+    if (
+      previousSelectedSessionId &&
+      !nextSelectedSessionId &&
+      !pendingViewSessionRef.current &&
+      !isLoading
+    ) {
+      resetSessionViewState({
+        clearCachedMessages: true,
+        clearPendingSession: true,
+      });
+    }
+
+    previousSelectedSessionIdRef.current = nextSelectedSessionId;
+  }, [isLoading, pendingViewSessionRef, resetSessionViewState, selectedSession?.id]);
 
   const loadSessionMessages = useCallback(
     async (projectName: string, sessionId: string, loadMore = false, provider: Provider | string = 'claude') => {
@@ -377,27 +435,8 @@ export function useChatSessionState({
         const sessionChanged = currentSessionId !== null && currentSessionId !== selectedSession.id;
         if (sessionChanged) {
           if (!isSystemSessionChange) {
-            resetStreamingState();
-            pendingViewSessionRef.current = null;
-            setChatMessages([]);
-            setSessionMessages([]);
-            setClaudeStatus(null);
-            setCanAbortSession(false);
+            resetSessionViewState();
           }
-
-          messagesOffsetRef.current = 0;
-          setHasMoreMessages(false);
-          setTotalMessages(0);
-          setVisibleMessageCount(INITIAL_VISIBLE_MESSAGES);
-          setAllMessagesLoaded(false);
-          allMessagesLoadedRef.current = false;
-          setIsLoadingAllMessages(false);
-          setLoadAllJustFinished(false);
-          setShowLoadAllOverlay(false);
-          if (loadAllOverlayTimerRef.current) clearTimeout(loadAllOverlayTimerRef.current);
-          if (loadAllFinishedTimerRef.current) clearTimeout(loadAllFinishedTimerRef.current);
-          setTokenBudget(null);
-          setIsLoading(false);
 
           if (ws) {
             sendMessage({
@@ -449,21 +488,8 @@ export function useChatSessionState({
         }
       } else {
         if (!isSystemSessionChange) {
-          resetStreamingState();
-          pendingViewSessionRef.current = null;
-          setChatMessages([]);
-          setSessionMessages([]);
-          setClaudeStatus(null);
-          setCanAbortSession(false);
-          setIsLoading(false);
+          resetSessionViewState();
         }
-
-        setCurrentSessionId(null);
-        sessionStorage.removeItem('cursorSessionId');
-        messagesOffsetRef.current = 0;
-        setHasMoreMessages(false);
-        setTotalMessages(0);
-        setTokenBudget(null);
       }
 
       setTimeout(() => {
@@ -478,7 +504,7 @@ export function useChatSessionState({
     loadCursorSessionMessages,
     loadSessionMessages,
     pendingViewSessionRef,
-    resetStreamingState,
+    resetSessionViewState,
     selectedProject,
     selectedSession,
     sendMessage,
@@ -538,14 +564,17 @@ export function useChatSessionState({
   }, [pendingViewSessionRef, selectedSession?.id]);
 
   useEffect(() => {
-    if (sessionMessages.length > 0) {
-      const isCodexSession = selectedSession?.__provider === 'codex';
-      if (isCodexSession && isLoading) {
-        return;
-      }
-      setChatMessages(convertedMessages);
+    if (!selectedSession || sessionMessages.length === 0) {
+      return;
     }
-  }, [convertedMessages, isLoading, selectedSession?.__provider, sessionMessages.length]);
+
+    const isCodexSession = selectedSession.__provider === 'codex';
+    if (isCodexSession && isLoading) {
+      return;
+    }
+
+    setChatMessages(convertedMessages);
+  }, [convertedMessages, isLoading, selectedSession, sessionMessages.length]);
 
   useEffect(() => {
     if (selectedProject && chatMessages.length > 0) {

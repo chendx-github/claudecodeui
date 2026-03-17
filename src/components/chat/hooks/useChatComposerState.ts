@@ -87,6 +87,50 @@ const createFakeSubmitEvent = () => {
 const isTemporarySessionId = (sessionId: string | null | undefined) =>
   Boolean(sessionId && sessionId.startsWith('new-session-'));
 
+const resolveEffectiveSessionId = ({
+  selectedSessionId,
+  currentSessionId,
+  pendingSessionId,
+  provider,
+}: {
+  selectedSessionId: string | null | undefined;
+  currentSessionId: string | null | undefined;
+  pendingSessionId: string | null | undefined;
+  provider: SessionProvider;
+}): string | null => {
+  if (selectedSessionId) {
+    return isTemporarySessionId(selectedSessionId) ? null : selectedSessionId;
+  }
+
+  if (pendingSessionId) {
+    return isTemporarySessionId(pendingSessionId) ? null : pendingSessionId;
+  }
+
+  // If there's no selected session and no pending view session marker,
+  // treat this as an explicit "new session" intent and avoid stale reuse.
+  if (!pendingSessionId) {
+    return provider === 'cursor'
+      ? (() => {
+          const storedCursorSessionId =
+            typeof window !== 'undefined' ? sessionStorage.getItem('cursorSessionId') : null;
+          return isTemporarySessionId(storedCursorSessionId) ? null : storedCursorSessionId;
+        })()
+      : null;
+  }
+
+  if (currentSessionId) {
+    return isTemporarySessionId(currentSessionId) ? null : currentSessionId;
+  }
+
+  if (provider === 'cursor') {
+    const storedCursorSessionId =
+      typeof window !== 'undefined' ? sessionStorage.getItem('cursorSessionId') : null;
+    return isTemporarySessionId(storedCursorSessionId) ? null : storedCursorSessionId;
+  }
+
+  return null;
+};
+
 export function useChatComposerState({
   selectedProject,
   selectedSession,
@@ -567,11 +611,20 @@ export function useChatComposerState({
       setIsUserScrolledUp(false);
       setTimeout(() => scrollToBottom(), 100);
 
-      const effectiveSessionId =
-        currentSessionId || selectedSession?.id || sessionStorage.getItem('cursorSessionId');
-      const sessionToActivate = effectiveSessionId || `new-session-${Date.now()}`;
+      const selectedSessionId = selectedSession?.id || null;
+      const pendingSessionId = pendingViewSessionRef.current?.sessionId || null;
+      const effectiveSessionId = resolveEffectiveSessionId({
+        selectedSessionId,
+        currentSessionId,
+        pendingSessionId,
+        provider,
+      });
+      const temporarySelectedSessionId = isTemporarySessionId(selectedSessionId)
+        ? selectedSessionId
+        : null;
+      const sessionToActivate = effectiveSessionId || temporarySelectedSessionId || `new-session-${Date.now()}`;
 
-      if (!effectiveSessionId && !selectedSession?.id) {
+      if (!effectiveSessionId && (!selectedSessionId || isTemporarySessionId(selectedSessionId))) {
         if (typeof window !== 'undefined') {
           // Reset stale pending IDs from previous interrupted runs before creating a new one.
           sessionStorage.removeItem('pendingSessionId');

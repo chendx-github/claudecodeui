@@ -147,6 +147,7 @@ export function useProjectsState({
   const [externalMessageUpdate, setExternalMessageUpdate] = useState(0);
 
   const loadingProgressTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const suppressedSessionRouteSyncRef = useRef<string | null>(null);
 
   const fetchProjects = useCallback(async () => {
     try {
@@ -287,7 +288,21 @@ export function useProjectsState({
   }, []);
 
   useEffect(() => {
-    if (!sessionId || projects.length === 0) {
+    if (projects.length === 0) {
+      return;
+    }
+
+    if (!sessionId) {
+      if (selectedSession) {
+        setSelectedSession(null);
+      }
+      return;
+    }
+
+    if (suppressedSessionRouteSyncRef.current === sessionId) {
+      if (selectedSession) {
+        setSelectedSession(null);
+      }
       return;
     }
 
@@ -304,6 +319,7 @@ export function useProjectsState({
         if (shouldUpdateSession) {
           setSelectedSession({ ...claudeSession, __provider: 'claude' });
         }
+        suppressedSessionRouteSyncRef.current = null;
         return;
       }
 
@@ -319,6 +335,7 @@ export function useProjectsState({
         if (shouldUpdateSession) {
           setSelectedSession({ ...cursorSession, __provider: 'cursor' });
         }
+        suppressedSessionRouteSyncRef.current = null;
         return;
       }
 
@@ -334,6 +351,7 @@ export function useProjectsState({
         if (shouldUpdateSession) {
           setSelectedSession({ ...codexSession, __provider: 'codex' });
         }
+        suppressedSessionRouteSyncRef.current = null;
         return;
       }
 
@@ -349,8 +367,13 @@ export function useProjectsState({
         if (shouldUpdateSession) {
           setSelectedSession({ ...geminiSession, __provider: 'gemini' });
         }
+        suppressedSessionRouteSyncRef.current = null;
         return;
       }
+    }
+
+    if (selectedSession) {
+      setSelectedSession(null);
     }
   }, [sessionId, projects, selectedProject?.name, selectedSession?.id, selectedSession?.__provider]);
 
@@ -362,6 +385,7 @@ export function useProjectsState({
 
   const handleProjectSelect = useCallback(
     (project: Project) => {
+      suppressedSessionRouteSyncRef.current = null;
       setSelectedProject(project);
       setSelectedSession(null);
       navigate('/');
@@ -375,6 +399,7 @@ export function useProjectsState({
 
   const handleSessionSelect = useCallback(
     (session: ProjectSession) => {
+      suppressedSessionRouteSyncRef.current = null;
       setSelectedSession(session);
 
       if (activeTab === 'tasks' || activeTab === 'preview') {
@@ -402,6 +427,7 @@ export function useProjectsState({
 
   const handleNewSession = useCallback(
     (project: Project) => {
+      suppressedSessionRouteSyncRef.current = selectedSession?.id || null;
       setSelectedProject(project);
       setSelectedSession(null);
       setActiveTab('chat');
@@ -411,7 +437,7 @@ export function useProjectsState({
         setSidebarOpen(false);
       }
     },
-    [isMobile, navigate],
+    [isMobile, navigate, selectedSession?.id],
   );
 
   const handleSessionDelete = useCallback(
