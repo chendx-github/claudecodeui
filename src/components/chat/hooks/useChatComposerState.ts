@@ -692,6 +692,7 @@ export function useChatComposerState({
             model: modelReasoningControlsEnabled ? codexModel : undefined,
             reasoningEffort: modelReasoningControlsEnabled ? codexReasoningEffort : undefined,
             permissionMode: permissionMode === 'plan' ? 'default' : permissionMode,
+            images: uploadedImages,
           },
         });
       } else if (provider === 'gemini') {
