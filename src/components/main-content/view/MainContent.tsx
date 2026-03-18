@@ -1,22 +1,20 @@
 import React, { useEffect } from 'react';
-
 import ChatInterface from '../../chat/view/ChatInterface';
 import FileTree from '../../file-tree/view/FileTree';
 import StandaloneShell from '../../standalone-shell/view/StandaloneShell';
 import GitPanel from '../../git-panel/view/GitPanel';
-import ErrorBoundary from '../../ErrorBoundary';
-
-import MainContentHeader from './subcomponents/MainContentHeader';
-import MainContentStateView from './subcomponents/MainContentStateView';
-import TaskMasterPanel from './subcomponents/TaskMasterPanel';
+import PluginTabContent from '../../plugins/view/PluginTabContent';
 import type { MainContentProps } from '../types/types';
-
 import { useTaskMaster } from '../../../contexts/TaskMasterContext';
 import { useTasksSettings } from '../../../contexts/TasksSettingsContext';
 import { useUiPreferences } from '../../../hooks/useUiPreferences';
 import { useEditorSidebar } from '../../code-editor/hooks/useEditorSidebar';
 import EditorSidebar from '../../code-editor/view/EditorSidebar';
 import type { Project } from '../../../types/app';
+import { TaskMasterPanel } from '../../task-master';
+import MainContentHeader from './subcomponents/MainContentHeader';
+import MainContentStateView from './subcomponents/MainContentStateView';
+import ErrorBoundary from './ErrorBoundary';
 
 type TaskMasterContextValue = {
   currentProject?: Project | null;
@@ -82,10 +80,13 @@ function MainContent({
   });
 
   useEffect(() => {
-    if (selectedProject && selectedProject !== currentProject) {
+    const selectedProjectName = selectedProject?.name;
+    const currentProjectName = currentProject?.name;
+
+    if (selectedProject && selectedProjectName !== currentProjectName) {
       setCurrentProject?.(selectedProject);
     }
-  }, [selectedProject, currentProject, setCurrentProject]);
+  }, [selectedProject, currentProject?.name, setCurrentProject]);
 
   useEffect(() => {
     if (!shouldShowTasksTab && activeTab === 'tasks') {
@@ -102,7 +103,7 @@ function MainContent({
   }
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="flex h-full flex-col">
       <MainContentHeader
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -113,8 +114,8 @@ function MainContent({
         onMenuClick={onMenuClick}
       />
 
-      <div className="flex-1 flex min-h-0 overflow-hidden">
-        <div className={`flex flex-col min-h-0 min-w-0 overflow-hidden ${editorExpanded ? 'hidden' : ''} flex-1`}>
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <div className={`flex min-h-0 min-w-[200px] flex-col overflow-hidden ${editorExpanded ? 'hidden' : ''} flex-1`}>
           <div className={`h-full ${activeTab === 'chat' ? 'block' : 'hidden'}`}>
             <ErrorBoundary showDetails>
               <ChatInterface
@@ -153,7 +154,12 @@ function MainContent({
 
           {activeTab === 'shell' && (
             <div className="h-full w-full overflow-hidden">
-              <StandaloneShell project={selectedProject} session={selectedSession} showHeader={false} />
+              <StandaloneShell
+                project={selectedProject}
+                session={selectedSession}
+                showHeader={false}
+                isActive={activeTab === 'shell'}
+              />
             </div>
           )}
 
@@ -166,6 +172,16 @@ function MainContent({
           {shouldShowTasksTab && <TaskMasterPanel isVisible={activeTab === 'tasks'} />}
 
           <div className={`h-full overflow-hidden ${activeTab === 'preview' ? 'block' : 'hidden'}`} />
+
+          {activeTab.startsWith('plugin:') && (
+            <div className="h-full overflow-hidden">
+              <PluginTabContent
+                pluginName={activeTab.replace('plugin:', '')}
+                selectedProject={selectedProject}
+                selectedSession={selectedSession}
+              />
+            </div>
+          )}
         </div>
 
         <EditorSidebar

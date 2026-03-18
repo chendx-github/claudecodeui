@@ -20,6 +20,7 @@ import type {
   McpServer,
   McpToolsResult,
   McpTestResult,
+  NotificationPreferencesState,
   ProjectSortOrder,
   SettingsMainTab,
   SettingsProject,
@@ -41,6 +42,7 @@ type StatusApiResponse = {
   authenticated?: boolean;
   email?: string | null;
   error?: string | null;
+  method?: string;
 };
 
 type JsonResult = {
@@ -95,9 +97,14 @@ type CodexSettingsStorage = {
   permissionMode?: CodexPermissionMode;
 };
 
+type NotificationPreferencesResponse = {
+  success?: boolean;
+  preferences?: NotificationPreferencesState;
+};
+
 type ActiveLoginProvider = AgentProvider | '';
 
-const KNOWN_MAIN_TABS: SettingsMainTab[] = ['agents', 'appearance', 'git', 'api', 'tasks'];
+const KNOWN_MAIN_TABS: SettingsMainTab[] = ['agents', 'appearance', 'git', 'api', 'tasks', 'notifications', 'plugins'];
 
 const normalizeMainTab = (tab: string): SettingsMainTab => {
   // Keep backwards compatibility with older callers that still pass "tools".
@@ -185,12 +192,23 @@ const createEmptyCursorPermissions = (): CursorPermissionsState => ({
   ...DEFAULT_CURSOR_PERMISSIONS,
 });
 
+const createDefaultNotificationPreferences = (): NotificationPreferencesState => ({
+  channels: {
+    inApp: true,
+    webPush: false,
+  },
+  events: {
+    actionRequired: true,
+    stop: true,
+    error: true,
+  },
+});
+
 export function useSettingsController({ isOpen, initialTab, projects, onClose }: UseSettingsControllerArgs) {
   const { isDarkMode, toggleDarkMode } = useTheme() as ThemeContextValue;
   const closeTimerRef = useRef<number | null>(null);
 
   const [activeTab, setActiveTab] = useState<SettingsMainTab>(() => normalizeMainTab(initialTab));
-  const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'success' | 'error' | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [projectSortOrder, setProjectSortOrder] = useState<ProjectSortOrder>('name');
@@ -203,6 +221,9 @@ export function useSettingsController({ isOpen, initialTab, projects, onClose }:
   ));
   const [cursorPermissions, setCursorPermissions] = useState<CursorPermissionsState>(() => (
     createEmptyCursorPermissions()
+  ));
+  const [notificationPreferences, setNotificationPreferences] = useState<NotificationPreferencesState>(() => (
+    createDefaultNotificationPreferences()
   ));
   const [codexPermissionMode, setCodexPermissionMode] = useState<CodexPermissionMode>('default');
   const [geminiPermissionMode, setGeminiPermissionMode] = useState<GeminiPermissionMode>('default');
@@ -267,6 +288,7 @@ export function useSettingsController({ isOpen, initialTab, projects, onClose }:
         email: data.email || null,
         loading: false,
         error: data.error || null,
+        method: data.method,
       });
     } catch (error) {
       console.error(`Error checking ${provider} auth status:`, error);
@@ -669,6 +691,22 @@ export function useSettingsController({ isOpen, initialTab, projects, onClose }:
       );
       setGeminiPermissionMode(savedGeminiSettings.permissionMode || 'default');
 
+      try {
+        const notificationResponse = await authenticatedFetch('/api/settings/notification-preferences');
+        if (notificationResponse.ok) {
+          const notificationData = await toResponseJson<NotificationPreferencesResponse>(notificationResponse);
+          if (notificationData.success && notificationData.preferences) {
+            setNotificationPreferences(notificationData.preferences);
+          } else {
+            setNotificationPreferences(createDefaultNotificationPreferences());
+          }
+        } else {
+          setNotificationPreferences(createDefaultNotificationPreferences());
+        }
+      } catch {
+        setNotificationPreferences(createDefaultNotificationPreferences());
+      }
+
       await Promise.all([
         fetchMcpServers(),
         fetchCursorMcpServers(),
@@ -678,6 +716,7 @@ export function useSettingsController({ isOpen, initialTab, projects, onClose }:
       console.error('Error loading settings:', error);
       setClaudePermissions(createEmptyClaudePermissions());
       setCursorPermissions(createEmptyCursorPermissions());
+      setNotificationPreferences(createDefaultNotificationPreferences());
       setCodexPermissionMode('default');
       setProjectSortOrder('name');
     }
@@ -698,8 +737,7 @@ export function useSettingsController({ isOpen, initialTab, projects, onClose }:
     void checkAuthStatus(loginProvider);
   }, [checkAuthStatus, loginProvider]);
 
-  const saveSettings = useCallback(() => {
-    setIsSaving(true);
+  const saveSettings = useCallback(async () => {
     setSaveStatus(null);
 
     try {
@@ -729,17 +767,18 @@ export function useSettingsController({ isOpen, initialTab, projects, onClose }:
         lastUpdated: now,
       }));
 
-      setSaveStatus('success');
-      if (closeTimerRef.current !== null) {
-        window.clearTimeout(closeTimerRef.current);
-        closeTimerRef.current = null;
+      const notificationResponse = await authenticatedFetch('/api/settings/notification-preferences', {
+        method: 'PUT',
+        body: JSON.stringify(notificationPreferences),
+      });
+      if (!notificationResponse.ok) {
+        throw new Error('Failed to save notification preferences');
       }
-      closeTimerRef.current = window.setTimeout(() => onClose(), 1000);
+
+      setSaveStatus('success');
     } catch (error) {
       console.error('Error saving settings:', error);
       setSaveStatus('error');
-    } finally {
-      setIsSaving(false);
     }
   }, [
     claudePermissions.allowedTools,
@@ -749,7 +788,8 @@ export function useSettingsController({ isOpen, initialTab, projects, onClose }:
     cursorPermissions.allowedCommands,
     cursorPermissions.disallowedCommands,
     cursorPermissions.skipPermissions,
-    onClose,
+    notificationPreferences,
+    geminiPermissionMode,
     projectSortOrder,
   ]);
 
@@ -802,10 +842,57 @@ export function useSettingsController({ isOpen, initialTab, projects, onClose }:
     window.dispatchEvent(new Event('codeEditorSettingsChanged'));
   }, [codeEditorSettings]);
 
+  // Auto-save permissions and sort order with debounce
+  const autoSaveTimerRef = useRef<number | null>(null);
+  const isInitialLoadRef = useRef(true);
+
+  useEffect(() => {
+    // Skip auto-save on initial load (settings are being loaded from localStorage)
+    if (isInitialLoadRef.current) {
+      isInitialLoadRef.current = false;
+      return;
+    }
+
+    if (autoSaveTimerRef.current !== null) {
+      window.clearTimeout(autoSaveTimerRef.current);
+    }
+
+    autoSaveTimerRef.current = window.setTimeout(() => {
+      saveSettings();
+    }, 500);
+
+    return () => {
+      if (autoSaveTimerRef.current !== null) {
+        window.clearTimeout(autoSaveTimerRef.current);
+      }
+    };
+  }, [saveSettings]);
+
+  // Clear save status after 2 seconds
+  useEffect(() => {
+    if (saveStatus === null) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => setSaveStatus(null), 2000);
+    return () => window.clearTimeout(timer);
+  }, [saveStatus]);
+
+  // Reset initial load flag when settings dialog opens
+  useEffect(() => {
+    if (isOpen) {
+      isInitialLoadRef.current = true;
+    }
+  }, [isOpen]);
+
   useEffect(() => () => {
     if (closeTimerRef.current !== null) {
       window.clearTimeout(closeTimerRef.current);
       closeTimerRef.current = null;
+    }
+    if (autoSaveTimerRef.current !== null) {
+      window.clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = null;
     }
   }, []);
 
@@ -814,7 +901,6 @@ export function useSettingsController({ isOpen, initialTab, projects, onClose }:
     setActiveTab,
     isDarkMode,
     toggleDarkMode,
-    isSaving,
     saveStatus,
     deleteError,
     projectSortOrder,
@@ -825,6 +911,8 @@ export function useSettingsController({ isOpen, initialTab, projects, onClose }:
     setClaudePermissions,
     cursorPermissions,
     setCursorPermissions,
+    notificationPreferences,
+    setNotificationPreferences,
     codexPermissionMode,
     setCodexPermissionMode,
     mcpServers,
@@ -859,6 +947,5 @@ export function useSettingsController({ isOpen, initialTab, projects, onClose }:
     loginProvider,
     selectedProject,
     handleLoginComplete,
-    saveSettings,
   };
 }

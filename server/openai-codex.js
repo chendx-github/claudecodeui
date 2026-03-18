@@ -13,6 +13,7 @@ import os from 'os';
 import path from 'path';
 import readline from 'readline';
 import TOML from '@iarna/toml';
+import { notifyRunFailed, notifyRunStopped } from './services/notification-orchestrator.js';
 
 // Track active sessions
 const activeCodexSessions = new Map();
@@ -486,6 +487,7 @@ async function cleanupCodexImageTempDir(tempDir) {
 export async function queryCodex(command, options = {}, ws) {
   const {
     sessionId,
+    sessionSummary,
     cwd,
     projectPath,
     model,
@@ -549,6 +551,7 @@ export async function queryCodex(command, options = {}, ws) {
   const startedAt = new Date().toISOString();
   const prompt = typeof command === 'string' ? command : '';
   let codexProcess = null;
+  let terminalFailure = null;
 
   try {
     codexProcess = spawn('codex', args, {
@@ -637,6 +640,17 @@ export async function queryCodex(command, options = {}, ws) {
         sessionId: currentSessionId,
       });
 
+      if (event.type === 'turn.failed' && !terminalFailure) {
+        terminalFailure = event.error || new Error('Turn failed');
+        notifyRunFailed({
+          userId: ws?.userId || null,
+          provider: 'codex',
+          sessionId: currentSessionId,
+          sessionName: sessionSummary,
+          error: terminalFailure,
+        });
+      }
+
       if (event.type === 'turn.completed' && event.usage) {
         const tokenBudget = extractTokenBudgetFromCodexUsage(event.usage);
         if (tokenBudget) {
@@ -655,6 +669,7 @@ export async function queryCodex(command, options = {}, ws) {
 
     if (!wasAborted && exitCode !== 0) {
       const stderrText = stderrChunks.join('').trim();
+      terminalFailure = terminalFailure || new Error(stderrText || `Codex Exec exited with code ${exitCode}`);
       throw new Error(stderrText || `Codex Exec exited with code ${exitCode}`);
     }
 
@@ -667,6 +682,15 @@ export async function queryCodex(command, options = {}, ws) {
         sessionId: currentSessionId,
         actualSessionId: currentSessionId,
       });
+      if (!terminalFailure) {
+        notifyRunStopped({
+          userId: ws?.userId || null,
+          provider: 'codex',
+          sessionId: currentSessionId,
+          sessionName: sessionSummary,
+          stopReason: 'completed',
+        });
+      }
     }
 
   } catch (error) {
@@ -681,7 +705,17 @@ export async function queryCodex(command, options = {}, ws) {
         type: 'codex-error',
         error: error.message,
         sessionId: currentSessionId,
+        provider: 'codex',
       });
+      if (!terminalFailure) {
+        notifyRunFailed({
+          userId: ws?.userId || null,
+          provider: 'codex',
+          sessionId: currentSessionId,
+          sessionName: sessionSummary,
+          error,
+        });
+      }
     }
 
   } finally {

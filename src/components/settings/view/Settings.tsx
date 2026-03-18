@@ -1,35 +1,26 @@
-import { Settings as SettingsIcon, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import LoginModal from '../../LoginModal';
-import { Button } from '../../ui/button';
+import ProviderLoginModal from '../../provider-auth/view/ProviderLoginModal';
+import { Button } from '../../../shared/view/ui';
 import ClaudeMcpFormModal from '../view/modals/ClaudeMcpFormModal';
 import CodexMcpFormModal from '../view/modals/CodexMcpFormModal';
-import SettingsMainTabs from '../view/SettingsMainTabs';
+import SettingsSidebar from '../view/SettingsSidebar';
 import AgentsSettingsTab from '../view/tabs/agents-settings/AgentsSettingsTab';
 import AppearanceSettingsTab from '../view/tabs/AppearanceSettingsTab';
 import CredentialsSettingsTab from '../view/tabs/api-settings/CredentialsSettingsTab';
 import GitSettingsTab from '../view/tabs/git-settings/GitSettingsTab';
+import NotificationsSettingsTab from '../view/tabs/NotificationsSettingsTab';
 import TasksSettingsTab from '../view/tabs/tasks-settings/TasksSettingsTab';
+import PluginSettingsTab from '../../plugins/view/PluginSettingsTab';
 import { useSettingsController } from '../hooks/useSettingsController';
-import type { AgentProvider, SettingsProject, SettingsProps } from '../types/types';
-
-type LoginModalProps = {
-  isOpen: boolean;
-  onClose: () => void;
-  provider: AgentProvider | '';
-  project: SettingsProject | null;
-  onComplete: (exitCode: number) => void;
-  isAuthenticated: boolean;
-};
-
-const LoginModalComponent = LoginModal as unknown as (props: LoginModalProps) => JSX.Element;
+import { useWebPush } from '../../../hooks/useWebPush';
+import type { SettingsProps } from '../types/types';
 
 function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }: SettingsProps) {
   const { t } = useTranslation('settings');
   const {
     activeTab,
     setActiveTab,
-    isSaving,
     saveStatus,
     deleteError,
     projectSortOrder,
@@ -38,6 +29,8 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }: Set
     updateCodeEditorSetting,
     claudePermissions,
     setClaudePermissions,
+    notificationPreferences,
+    setNotificationPreferences,
     cursorPermissions,
     setCursorPermissions,
     codexPermissionMode,
@@ -74,13 +67,38 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }: Set
     loginProvider,
     selectedProject,
     handleLoginComplete,
-    saveSettings,
   } = useSettingsController({
     isOpen,
     initialTab,
     projects,
     onClose,
   });
+
+  const {
+    permission: pushPermission,
+    isSubscribed: isPushSubscribed,
+    isLoading: isPushLoading,
+    subscribe: pushSubscribe,
+    unsubscribe: pushUnsubscribe,
+  } = useWebPush();
+
+  const handleEnablePush = async () => {
+    await pushSubscribe();
+    // Server sets webPush: true in preferences on subscribe; sync local state
+    setNotificationPreferences({
+      ...notificationPreferences,
+      channels: { ...notificationPreferences.channels, webPush: true },
+    });
+  };
+
+  const handleDisablePush = async () => {
+    await pushUnsubscribe();
+    // Server sets webPush: false in preferences on unsubscribe; sync local state
+    setNotificationPreferences({
+      ...notificationPreferences,
+      channels: { ...notificationPreferences.channels, webPush: false },
+    });
+  };
 
   if (!isOpen) {
     return null;
@@ -95,141 +113,109 @@ function Settings({ isOpen, onClose, projects = [], initialTab = 'agents' }: Set
         : false;
 
   return (
-    <div className="modal-backdrop fixed inset-0 flex items-center justify-center z-[9999] md:p-4 bg-background/95">
-      <div className="bg-background border border-border md:rounded-lg shadow-xl w-full md:max-w-4xl h-full md:h-[90vh] flex flex-col">
-        <div className="flex items-center justify-between p-4 md:p-6 border-b border-border flex-shrink-0">
-          <div className="flex items-center gap-3">
-            <SettingsIcon className="w-5 h-5 md:w-6 md:h-6 text-blue-600" />
-            <h2 className="text-lg md:text-xl font-semibold text-foreground">{t('title')}</h2>
-          </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onClose}
-            className="text-muted-foreground hover:text-foreground touch-manipulation"
-          >
-            <X className="w-5 h-5" />
-          </Button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto">
-          <SettingsMainTabs activeTab={activeTab} onChange={setActiveTab} />
-
-          <div className="p-4 md:p-6 space-y-6 md:space-y-8 pb-safe-area-inset-bottom">
-            {activeTab === 'appearance' && (
-              <AppearanceSettingsTab
-                projectSortOrder={projectSortOrder}
-                onProjectSortOrderChange={setProjectSortOrder}
-                codeEditorSettings={codeEditorSettings}
-                onCodeEditorThemeChange={(value) => updateCodeEditorSetting('theme', value)}
-                onCodeEditorWordWrapChange={(value) => updateCodeEditorSetting('wordWrap', value)}
-                onCodeEditorShowMinimapChange={(value) => updateCodeEditorSetting('showMinimap', value)}
-                onCodeEditorLineNumbersChange={(value) => updateCodeEditorSetting('lineNumbers', value)}
-                onCodeEditorFontSizeChange={(value) => updateCodeEditorSetting('fontSize', value)}
-              />
-            )}
-
-            {activeTab === 'git' && <GitSettingsTab />}
-
-            {activeTab === 'agents' && (
-              <AgentsSettingsTab
-                claudeAuthStatus={claudeAuthStatus}
-                cursorAuthStatus={cursorAuthStatus}
-                codexAuthStatus={codexAuthStatus}
-                geminiAuthStatus={geminiAuthStatus}
-                onClaudeLogin={() => openLoginForProvider('claude')}
-                onCursorLogin={() => openLoginForProvider('cursor')}
-                onCodexLogin={() => openLoginForProvider('codex')}
-                onGeminiLogin={() => openLoginForProvider('gemini')}
-                claudePermissions={claudePermissions}
-                onClaudePermissionsChange={setClaudePermissions}
-                cursorPermissions={cursorPermissions}
-                onCursorPermissionsChange={setCursorPermissions}
-                codexPermissionMode={codexPermissionMode}
-                onCodexPermissionModeChange={setCodexPermissionMode}
-                geminiPermissionMode={geminiPermissionMode}
-                onGeminiPermissionModeChange={setGeminiPermissionMode}
-                mcpServers={mcpServers}
-                cursorMcpServers={cursorMcpServers}
-                codexMcpServers={codexMcpServers}
-                mcpTestResults={mcpTestResults}
-                mcpServerTools={mcpServerTools}
-                mcpToolsLoading={mcpToolsLoading}
-                onOpenMcpForm={openMcpForm}
-                onDeleteMcpServer={handleMcpDelete}
-                onTestMcpServer={handleMcpTest}
-                onDiscoverMcpTools={handleMcpToolsDiscovery}
-                onOpenCodexMcpForm={openCodexMcpForm}
-                onDeleteCodexMcpServer={handleCodexMcpDelete}
-                deleteError={deleteError}
-              />
-            )}
-
-            {activeTab === 'tasks' && (
-              <div className="space-y-6 md:space-y-8">
-                <TasksSettingsTab />
-              </div>
-            )}
-
-            {activeTab === 'api' && (
-              <div className="space-y-6 md:space-y-8">
-                <CredentialsSettingsTab />
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 md:p-6 border-t border-border flex-shrink-0 gap-3 pb-safe-area-inset-bottom">
-          <div className="flex items-center justify-center sm:justify-start gap-2 order-2 sm:order-1">
+    <div className="modal-backdrop fixed inset-0 z-[9999] flex items-center justify-center bg-background/80 backdrop-blur-sm md:p-4">
+      <div className="flex h-full w-full flex-col overflow-hidden border border-border bg-background shadow-2xl md:h-[90vh] md:max-w-4xl md:rounded-xl">
+        {/* Header */}
+        <div className="flex flex-shrink-0 items-center justify-between border-b border-border px-4 py-3 md:px-5">
+          <h2 className="text-base font-semibold text-foreground">{t('title')}</h2>
+          <div className="flex items-center gap-2">
             {saveStatus === 'success' && (
-              <div className="text-green-600 dark:text-green-400 text-sm flex items-center gap-1">
-                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                </svg>
-                {t('saveStatus.success')}
-              </div>
+              <span className="text-xs text-muted-foreground animate-in fade-in">{t('saveStatus.success')}</span>
             )}
-            {saveStatus === 'error' && (
-              <div className="text-red-600 dark:text-red-400 text-sm flex items-center gap-1">
-                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
-                </svg>
-                {t('saveStatus.error')}
-              </div>
-            )}
-          </div>
-          <div className="flex items-center gap-3 order-1 sm:order-2">
             <Button
-              variant="outline"
+              variant="ghost"
+              size="sm"
               onClick={onClose}
-              disabled={isSaving}
-              className="flex-1 sm:flex-none h-10 touch-manipulation"
+              className="h-10 w-10 touch-manipulation p-0 text-muted-foreground hover:text-foreground active:bg-accent/50"
             >
-              {t('footerActions.cancel')}
-            </Button>
-            <Button
-              onClick={saveSettings}
-              disabled={isSaving}
-              className="flex-1 sm:flex-none h-10 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 touch-manipulation"
-            >
-              {isSaving ? (
-                <div className="flex items-center gap-2">
-                  <div className="w-4 h-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                  {t('saveStatus.saving')}
-                </div>
-              ) : (
-                t('footerActions.save')
-              )}
+              <X className="h-5 w-5" />
             </Button>
           </div>
+        </div>
+
+        {/* Body: sidebar + content */}
+        <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+          <SettingsSidebar activeTab={activeTab} onChange={setActiveTab} />
+
+          {/* Content */}
+          <main className="flex-1 overflow-y-auto">
+            <div key={activeTab} className="settings-content-enter space-y-6 p-4 pb-safe-area-inset-bottom md:space-y-8 md:p-6">
+              {activeTab === 'appearance' && (
+                <AppearanceSettingsTab
+                  projectSortOrder={projectSortOrder}
+                  onProjectSortOrderChange={setProjectSortOrder}
+                  codeEditorSettings={codeEditorSettings}
+                  onCodeEditorThemeChange={(value) => updateCodeEditorSetting('theme', value)}
+                  onCodeEditorWordWrapChange={(value) => updateCodeEditorSetting('wordWrap', value)}
+                  onCodeEditorShowMinimapChange={(value) => updateCodeEditorSetting('showMinimap', value)}
+                  onCodeEditorLineNumbersChange={(value) => updateCodeEditorSetting('lineNumbers', value)}
+                  onCodeEditorFontSizeChange={(value) => updateCodeEditorSetting('fontSize', value)}
+                />
+              )}
+
+              {activeTab === 'git' && <GitSettingsTab />}
+
+              {activeTab === 'agents' && (
+                <AgentsSettingsTab
+                  claudeAuthStatus={claudeAuthStatus}
+                  cursorAuthStatus={cursorAuthStatus}
+                  codexAuthStatus={codexAuthStatus}
+                  geminiAuthStatus={geminiAuthStatus}
+                  onClaudeLogin={() => openLoginForProvider('claude')}
+                  onCursorLogin={() => openLoginForProvider('cursor')}
+                  onCodexLogin={() => openLoginForProvider('codex')}
+                  onGeminiLogin={() => openLoginForProvider('gemini')}
+                  claudePermissions={claudePermissions}
+                  onClaudePermissionsChange={setClaudePermissions}
+                  cursorPermissions={cursorPermissions}
+                  onCursorPermissionsChange={setCursorPermissions}
+                  codexPermissionMode={codexPermissionMode}
+                  onCodexPermissionModeChange={setCodexPermissionMode}
+                  geminiPermissionMode={geminiPermissionMode}
+                  onGeminiPermissionModeChange={setGeminiPermissionMode}
+                  mcpServers={mcpServers}
+                  cursorMcpServers={cursorMcpServers}
+                  codexMcpServers={codexMcpServers}
+                  mcpTestResults={mcpTestResults}
+                  mcpServerTools={mcpServerTools}
+                  mcpToolsLoading={mcpToolsLoading}
+                  onOpenMcpForm={openMcpForm}
+                  onDeleteMcpServer={handleMcpDelete}
+                  onTestMcpServer={handleMcpTest}
+                  onDiscoverMcpTools={handleMcpToolsDiscovery}
+                  onOpenCodexMcpForm={openCodexMcpForm}
+                  onDeleteCodexMcpServer={handleCodexMcpDelete}
+                  deleteError={deleteError}
+                />
+              )}
+
+              {activeTab === 'tasks' && <TasksSettingsTab />}
+
+            {activeTab === 'notifications' && (
+              <NotificationsSettingsTab
+                notificationPreferences={notificationPreferences}
+                onNotificationPreferencesChange={setNotificationPreferences}
+                pushPermission={pushPermission}
+                isPushSubscribed={isPushSubscribed}
+                isPushLoading={isPushLoading}
+                onEnablePush={handleEnablePush}
+                onDisablePush={handleDisablePush}
+              />
+            )}
+
+              {activeTab === 'api' && <CredentialsSettingsTab />}
+
+              {activeTab === 'plugins' && <PluginSettingsTab />}
+            </div>
+          </main>
         </div>
       </div>
 
-      <LoginModalComponent
-        key={loginProvider}
+      <ProviderLoginModal
+        key={loginProvider || 'claude'}
         isOpen={showLoginModal}
         onClose={() => setShowLoginModal(false)}
-        provider={loginProvider}
+        provider={loginProvider || 'claude'}
         project={selectedProject}
         onComplete={handleLoginComplete}
         isAuthenticated={isAuthenticated}

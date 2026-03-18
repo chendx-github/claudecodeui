@@ -18,6 +18,12 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import os from 'os';
 import { CLAUDE_MODELS } from '../shared/modelConstants.js';
+import {
+  createNotificationEvent,
+  notifyRunFailed,
+  notifyRunStopped,
+  notifyUserIfEnabled
+} from './services/notification-orchestrator.js';
 
 const activeSessions = new Map();
 const pendingToolApprovals = new Map();
@@ -34,7 +40,7 @@ function createRequestId() {
 }
 
 function waitForToolApproval(requestId, options = {}) {
-  const { timeoutMs = TOOL_APPROVAL_TIMEOUT_MS, signal, onCancel } = options;
+  const { timeoutMs = TOOL_APPROVAL_TIMEOUT_MS, signal, onCancel, metadata } = options;
 
   return new Promise(resolve => {
     let settled = false;
@@ -78,9 +84,14 @@ function waitForToolApproval(requestId, options = {}) {
       signal.addEventListener('abort', abortHandler, { once: true });
     }
 
-    pendingToolApprovals.set(requestId, (decision) => {
+    const resolver = (decision) => {
       finalize(decision);
-    });
+    };
+    // Attach metadata for getPendingApprovalsForSession lookup
+    if (metadata) {
+      Object.assign(resolver, metadata);
+    }
+    pendingToolApprovals.set(requestId, resolver);
   });
 }
 
@@ -209,13 +220,14 @@ function mapCliOptionsToSDK(options = {}) {
  * @param {Array<string>} tempImagePaths - Temp image file paths for cleanup
  * @param {string} tempDir - Temp directory for cleanup
  */
-function addSession(sessionId, queryInstance, tempImagePaths = [], tempDir = null) {
+function addSession(sessionId, queryInstance, tempImagePaths = [], tempDir = null, writer = null) {
   activeSessions.set(sessionId, {
     instance: queryInstance,
     startTime: Date.now(),
     status: 'active',
     tempImagePaths,
-    tempDir
+    tempDir,
+    writer
   });
 }
 
@@ -510,11 +522,19 @@ async function loadMcpConfig(cwd) {
  * @returns {Promise<void>}
  */
 async function queryClaudeSDK(command, options = {}, ws) {
-  const { sessionId } = options;
+  const { sessionId, sessionSummary } = options;
   let capturedSessionId = sessionId;
   let sessionCreatedSent = false;
   let tempImagePaths = [];
   let tempDir = null;
+
+  const emitNotification = (event) => {
+    notifyUserIfEnabled({
+      userId: ws?.userId || null,
+      writer: ws,
+      event
+    });
+  };
 
   try {
     // Map CLI options to SDK format
@@ -531,6 +551,26 @@ async function queryClaudeSDK(command, options = {}, ws) {
     const finalCommand = imageResult.modifiedCommand;
     tempImagePaths = imageResult.tempImagePaths;
     tempDir = imageResult.tempDir;
+
+    sdkOptions.hooks = {
+      Notification: [{
+        matcher: '',
+        hooks: [async (input) => {
+          const message = typeof input?.message === 'string' ? input.message : 'Claude requires your attention.';
+          emitNotification(createNotificationEvent({
+            provider: 'claude',
+            sessionId: capturedSessionId || sessionId || null,
+            kind: 'action_required',
+            code: 'agent.notification',
+            meta: { message, sessionName: sessionSummary },
+            severity: 'warning',
+            requiresUserAction: true,
+            dedupeKey: `claude:hook:notification:${capturedSessionId || sessionId || 'none'}:${message}`
+          }));
+          return {};
+        }]
+      }]
+    };
 
     sdkOptions.canUseTool = async (toolName, input, context) => {
       const requiresInteraction = TOOLS_REQUIRING_INTERACTION.has(toolName);
@@ -563,10 +603,26 @@ async function queryClaudeSDK(command, options = {}, ws) {
         input,
         sessionId: capturedSessionId || sessionId || null
       });
+      emitNotification(createNotificationEvent({
+        provider: 'claude',
+        sessionId: capturedSessionId || sessionId || null,
+        kind: 'action_required',
+        code: 'permission.required',
+        meta: { toolName, sessionName: sessionSummary },
+        severity: 'warning',
+        requiresUserAction: true,
+        dedupeKey: `claude:permission:${capturedSessionId || sessionId || 'none'}:${requestId}`
+      }));
 
       const decision = await waitForToolApproval(requestId, {
         timeoutMs: requiresInteraction ? 0 : undefined,
         signal: context?.signal,
+        metadata: {
+          _sessionId: capturedSessionId || sessionId || null,
+          _toolName: toolName,
+          _input: input,
+          _receivedAt: new Date(),
+        },
         onCancel: (reason) => {
           ws.send({
             type: 'claude-permission-cancelled',
@@ -603,10 +659,22 @@ async function queryClaudeSDK(command, options = {}, ws) {
     const prevStreamTimeout = process.env.CLAUDE_CODE_STREAM_CLOSE_TIMEOUT;
     process.env.CLAUDE_CODE_STREAM_CLOSE_TIMEOUT = '300000';
 
-    const queryInstance = query({
-      prompt: finalCommand,
-      options: sdkOptions
-    });
+    let queryInstance;
+    try {
+      queryInstance = query({
+        prompt: finalCommand,
+        options: sdkOptions
+      });
+    } catch (hookError) {
+      // Older/newer SDK versions may not accept hook shapes yet.
+      // Keep notification behavior operational via runtime events even if hook registration fails.
+      console.warn('Failed to initialize Claude query with hooks, retrying without hooks:', hookError?.message || hookError);
+      delete sdkOptions.hooks;
+      queryInstance = query({
+        prompt: finalCommand,
+        options: sdkOptions
+      });
+    }
 
     // Restore immediately — Query constructor already captured the value
     if (prevStreamTimeout !== undefined) {
@@ -617,7 +685,7 @@ async function queryClaudeSDK(command, options = {}, ws) {
 
     // Track the query instance for abort capability
     if (capturedSessionId) {
-      addSession(capturedSessionId, queryInstance, tempImagePaths, tempDir);
+      addSession(capturedSessionId, queryInstance, tempImagePaths, tempDir, ws);
     }
 
     // Process streaming messages
@@ -627,7 +695,7 @@ async function queryClaudeSDK(command, options = {}, ws) {
       if (message.session_id && !capturedSessionId) {
 
         capturedSessionId = message.session_id;
-        addSession(capturedSessionId, queryInstance, tempImagePaths, tempDir);
+        addSession(capturedSessionId, queryInstance, tempImagePaths, tempDir, ws);
 
         // Set session ID on writer
         if (ws.setSessionId && typeof ws.setSessionId === 'function') {
@@ -648,9 +716,6 @@ async function queryClaudeSDK(command, options = {}, ws) {
         console.log('No session_id in message or already captured. message.session_id:', message.session_id, 'capturedSessionId:', capturedSessionId);
       }
 
-      // logs which model was used in the message
-      console.log("---> Model was sent using:", Object.keys(message.modelUsage || {}));
-
       // Transform and send message to WebSocket
       const transformedMessage = transformMessage(message);
       ws.send({
@@ -661,6 +726,10 @@ async function queryClaudeSDK(command, options = {}, ws) {
 
       // Extract and send token budget updates from result messages
       if (message.type === 'result') {
+        const models = Object.keys(message.modelUsage || {});
+        if (models.length > 0) {
+          console.log("---> Model was sent using:", models);
+        }
         const tokenBudget = extractTokenBudget(message);
         if (tokenBudget) {
           console.log('Token budget from modelUsage:', tokenBudget);
@@ -689,6 +758,13 @@ async function queryClaudeSDK(command, options = {}, ws) {
       exitCode: 0,
       isNewSession: !sessionId && !!command
     });
+    notifyRunStopped({
+      userId: ws?.userId || null,
+      provider: 'claude',
+      sessionId: capturedSessionId || sessionId || null,
+      sessionName: sessionSummary,
+      stopReason: 'completed'
+    });
     console.log('claude-complete event sent');
 
   } catch (error) {
@@ -707,6 +783,13 @@ async function queryClaudeSDK(command, options = {}, ws) {
       type: 'claude-error',
       error: error.message,
       sessionId: capturedSessionId || sessionId || null
+    });
+    notifyRunFailed({
+      userId: ws?.userId || null,
+      provider: 'claude',
+      sessionId: capturedSessionId || sessionId || null,
+      sessionName: sessionSummary,
+      error
     });
 
     throw error;
@@ -766,11 +849,50 @@ function getActiveClaudeSDKSessions() {
   return getAllSessions();
 }
 
+/**
+ * Get pending tool approvals for a specific session.
+ * @param {string} sessionId - The session ID
+ * @returns {Array} Array of pending permission request objects
+ */
+function getPendingApprovalsForSession(sessionId) {
+  const pending = [];
+  for (const [requestId, resolver] of pendingToolApprovals.entries()) {
+    if (resolver._sessionId === sessionId) {
+      pending.push({
+        requestId,
+        toolName: resolver._toolName || 'UnknownTool',
+        input: resolver._input,
+        context: resolver._context,
+        sessionId,
+        receivedAt: resolver._receivedAt || new Date(),
+      });
+    }
+  }
+  return pending;
+}
+
+/**
+ * Reconnect a session's WebSocketWriter to a new raw WebSocket.
+ * Called when client reconnects (e.g. page refresh) while SDK is still running.
+ * @param {string} sessionId - The session ID
+ * @param {Object} newRawWs - The new raw WebSocket connection
+ * @returns {boolean} True if writer was successfully reconnected
+ */
+function reconnectSessionWriter(sessionId, newRawWs) {
+  const session = getSession(sessionId);
+  if (!session?.writer?.updateWebSocket) return false;
+  session.writer.updateWebSocket(newRawWs);
+  console.log(`[RECONNECT] Writer swapped for session ${sessionId}`);
+  return true;
+}
+
 // Export public API
 export {
   queryClaudeSDK,
   abortClaudeSDKSession,
   isClaudeSDKSessionActive,
   getActiveClaudeSDKSessions,
-  resolveToolApproval
+  resolveToolApproval,
+  getPendingApprovalsForSession,
+  reconnectSessionWriter
 };

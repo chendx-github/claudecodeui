@@ -1,8 +1,10 @@
-import type { ReactNode } from 'react';
+import type { ReactNode, RefObject } from 'react';
 import { ChevronRight, Folder, FolderOpen } from 'lucide-react';
-import { cn } from '../../../lib/utils';
 import { useTranslation } from 'react-i18next';
+import { cn } from '../../../lib/utils';
+import { Input } from '../../../shared/view/ui';
 import type { FileTreeNode as FileTreeNodeType, FileTreeViewMode } from '../types/types';
+import FileContextMenu from './FileContextMenu';
 
 type FileTreeNodeProps = {
   item: FileTreeNodeType;
@@ -16,6 +18,20 @@ type FileTreeNodeProps = {
   renderFileIcon: (filename: string) => ReactNode;
   formatFileSize: (bytes?: number) => string;
   formatRelativeTime: (date?: string) => string;
+  onRename?: (item: FileTreeNodeType) => void;
+  onDelete?: (item: FileTreeNodeType) => void;
+  onNewFile?: (path: string) => void;
+  onNewFolder?: (path: string) => void;
+  onCopyPath?: (item: FileTreeNodeType) => void;
+  onDownload?: (item: FileTreeNodeType) => void;
+  onRefresh?: () => void;
+  renamingItem?: FileTreeNodeType | null;
+  renameValue?: string;
+  setRenameValue?: (value: string) => void;
+  handleConfirmRename?: () => void;
+  handleCancelRename?: () => void;
+  renameInputRef?: RefObject<HTMLInputElement>;
+  operationLoading?: boolean;
 };
 
 type TreeItemIconProps = {
@@ -27,23 +43,23 @@ type TreeItemIconProps = {
 function TreeItemIcon({ item, isOpen, renderFileIcon }: TreeItemIconProps) {
   if (item.type === 'directory') {
     return (
-      <span className="flex items-center gap-0.5 flex-shrink-0">
+      <span className="flex flex-shrink-0 items-center gap-0.5">
         <ChevronRight
           className={cn(
-            'w-3.5 h-3.5 text-muted-foreground/70 transition-transform duration-150',
+            'h-3.5 w-3.5 text-muted-foreground/70 transition-transform duration-150',
             isOpen && 'rotate-90',
           )}
         />
         {isOpen ? (
-          <FolderOpen className="w-4 h-4 text-blue-500 flex-shrink-0" />
+          <FolderOpen className="h-4 w-4 flex-shrink-0 text-blue-500" />
         ) : (
-          <Folder className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+          <Folder className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
         )}
       </span>
     );
   }
 
-  return <span className="flex items-center flex-shrink-0 ml-[18px]">{renderFileIcon(item.name)}</span>;
+  return <span className="ml-[18px] flex flex-shrink-0 items-center">{renderFileIcon(item.name)}</span>;
 }
 
 export default function FileTreeNode({
@@ -58,6 +74,20 @@ export default function FileTreeNode({
   renderFileIcon,
   formatFileSize,
   formatRelativeTime,
+  onRename,
+  onDelete,
+  onNewFile,
+  onNewFolder,
+  onCopyPath,
+  onDownload,
+  onRefresh,
+  renamingItem,
+  renameValue,
+  setRenameValue,
+  handleConfirmRename,
+  handleCancelRename,
+  renameInputRef,
+  operationLoading,
 }: FileTreeNodeProps) {
   const { t } = useTranslation();
   const isDirectory = item.type === 'directory';
@@ -65,79 +95,134 @@ export default function FileTreeNode({
   const hasChildren = Boolean(isDirectory && item.children && item.children.length > 0);
   const isLoadingChildren = isDirectory && loadingDirs.has(item.path);
   const hasLoadedChildren = isDirectory && loadedDirs.has(item.path);
+  const isRenaming = renamingItem?.path === item.path;
 
   const nameClassName = cn(
-    'text-[13px] leading-tight truncate',
+    'truncate text-[13px] leading-tight',
     isDirectory ? 'font-medium text-foreground' : 'text-foreground/90',
   );
 
-  // View mode only changes the row layout; selection, expansion, and recursion stay shared.
   const rowClassName = cn(
     viewMode === 'detailed'
-      ? 'group grid grid-cols-12 gap-2 py-[3px] pr-2 hover:bg-accent/60 cursor-pointer items-center rounded-sm transition-colors duration-100'
-      : 'group flex items-center justify-between py-[3px] pr-2 hover:bg-accent/60 cursor-pointer rounded-sm transition-colors duration-100',
+      ? 'group grid grid-cols-12 gap-2 items-center rounded-sm py-[3px] pr-2 transition-colors duration-100 hover:bg-accent/60 cursor-pointer'
+      : 'group flex items-center justify-between rounded-sm py-[3px] pr-2 transition-colors duration-100 hover:bg-accent/60 cursor-pointer',
     isDirectory && isOpen && 'border-l-2 border-primary/30',
     (isDirectory && !isOpen) || !isDirectory ? 'border-l-2 border-transparent' : '',
   );
 
+  if (isRenaming && setRenameValue && handleConfirmRename && handleCancelRename) {
+    return (
+      <div
+        className={cn(rowClassName, 'bg-accent/30')}
+        style={{ paddingLeft: `${level * 16 + 4}px` }}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <TreeItemIcon item={item} isOpen={isOpen} renderFileIcon={renderFileIcon} />
+        <Input
+          ref={renameInputRef}
+          type="text"
+          value={renameValue || ''}
+          onChange={(event) => setRenameValue(event.target.value)}
+          onKeyDown={(event) => {
+            event.stopPropagation();
+            if (event.key === 'Enter') handleConfirmRename();
+            if (event.key === 'Escape') handleCancelRename();
+          }}
+          onBlur={() => {
+            setTimeout(() => {
+              handleConfirmRename();
+            }, 100);
+          }}
+          className="h-6 flex-1 text-sm"
+          disabled={operationLoading}
+        />
+      </div>
+    );
+  }
+
+  const rowContent = (
+    <div
+      className={rowClassName}
+      style={{ paddingLeft: `${level * 16 + 4}px` }}
+      onClick={() => onItemClick(item)}
+    >
+      {viewMode === 'detailed' ? (
+        <>
+          <div className="col-span-5 flex min-w-0 items-center gap-1.5">
+            <TreeItemIcon item={item} isOpen={isOpen} renderFileIcon={renderFileIcon} />
+            <span className={nameClassName}>{item.name}</span>
+          </div>
+          <div className="col-span-2 text-sm tabular-nums text-muted-foreground">
+            {item.type === 'file' ? formatFileSize(item.size) : ''}
+          </div>
+          <div className="col-span-3 text-sm text-muted-foreground">{formatRelativeTime(item.modified)}</div>
+          <div className="col-span-2 flex min-w-0 items-center justify-between gap-1.5">
+            <span className="truncate font-mono text-sm text-muted-foreground">{item.permissionsRwx || ''}</span>
+            {renderItemActions(item)}
+          </div>
+        </>
+      ) : viewMode === 'compact' ? (
+        <>
+          <div className="flex min-w-0 items-center gap-1.5 flex-1">
+            <TreeItemIcon item={item} isOpen={isOpen} renderFileIcon={renderFileIcon} />
+            <span className={nameClassName}>{item.name}</span>
+          </div>
+          <div className="ml-2 flex flex-shrink-0 items-center gap-3 text-sm text-muted-foreground">
+            {item.type === 'file' && (
+              <>
+                <span className="tabular-nums">{formatFileSize(item.size)}</span>
+                <span className="font-mono">{item.permissionsRwx}</span>
+              </>
+            )}
+            {renderItemActions(item)}
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="flex min-w-0 items-center gap-1.5 flex-1">
+            <TreeItemIcon item={item} isOpen={isOpen} renderFileIcon={renderFileIcon} />
+            <span className={nameClassName}>{item.name}</span>
+          </div>
+          {renderItemActions(item)}
+        </>
+      )}
+    </div>
+  );
+
+  const hasContextMenu = onRename || onDelete || onNewFile || onNewFolder || onCopyPath || onDownload || onRefresh;
+
   return (
     <div className="select-none">
-      <div
-        className={rowClassName}
-        style={{ paddingLeft: `${level * 16 + 4}px` }}
-        onClick={() => onItemClick(item)}
-      >
-        {viewMode === 'detailed' ? (
-          <>
-            <div className="col-span-5 flex items-center gap-1.5 min-w-0">
-              <TreeItemIcon item={item} isOpen={isOpen} renderFileIcon={renderFileIcon} />
-              <span className={nameClassName}>{item.name}</span>
-            </div>
-            <div className="col-span-2 text-sm text-muted-foreground tabular-nums">
-              {item.type === 'file' ? formatFileSize(item.size) : ''}
-            </div>
-            <div className="col-span-3 text-sm text-muted-foreground">{formatRelativeTime(item.modified)}</div>
-            <div className="col-span-2 flex items-center justify-between gap-1.5 min-w-0">
-              <span className="text-sm text-muted-foreground font-mono truncate">{item.permissionsRwx || ''}</span>
-              {renderItemActions(item)}
-            </div>
-          </>
-        ) : viewMode === 'compact' ? (
-          <>
-            <div className="flex items-center gap-1.5 min-w-0 flex-1">
-              <TreeItemIcon item={item} isOpen={isOpen} renderFileIcon={renderFileIcon} />
-              <span className={nameClassName}>{item.name}</span>
-            </div>
-            <div className="flex items-center gap-3 text-sm text-muted-foreground flex-shrink-0 ml-2">
-              {item.type === 'file' && (
-                <>
-                  <span className="tabular-nums">{formatFileSize(item.size)}</span>
-                  <span className="font-mono">{item.permissionsRwx}</span>
-                </>
-              )}
-              {renderItemActions(item)}
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="flex items-center gap-1.5 min-w-0 flex-1">
-              <TreeItemIcon item={item} isOpen={isOpen} renderFileIcon={renderFileIcon} />
-              <span className={nameClassName}>{item.name}</span>
-            </div>
-            {renderItemActions(item)}
-          </>
-        )}
-      </div>
+      {hasContextMenu ? (
+        <FileContextMenu
+          item={item}
+          onRename={onRename}
+          onDelete={onDelete}
+          onNewFile={onNewFile}
+          onNewFolder={onNewFolder}
+          onCopyPath={onCopyPath}
+          onDownload={onDownload}
+          onRefresh={onRefresh}
+          isLoading={operationLoading}
+        >
+          {rowContent}
+        </FileContextMenu>
+      ) : (
+        rowContent
+      )}
 
       {isDirectory && isOpen && (
         <div className="relative">
           <span
-            className="absolute top-0 bottom-0 border-l border-border/40"
+            className="absolute bottom-0 top-0 border-l border-border/40"
             style={{ left: `${level * 16 + 14}px` }}
             aria-hidden="true"
           />
           {isLoadingChildren && (
-            <div className="py-[3px] text-xs text-muted-foreground" style={{ paddingLeft: `${(level + 1) * 16 + 4}px` }}>
+            <div
+              className="py-[3px] text-xs text-muted-foreground"
+              style={{ paddingLeft: `${(level + 1) * 16 + 4}px` }}
+            >
               {t('fileTree.loading')}
             </div>
           )}
@@ -155,6 +240,20 @@ export default function FileTreeNode({
               renderFileIcon={renderFileIcon}
               formatFileSize={formatFileSize}
               formatRelativeTime={formatRelativeTime}
+              onRename={onRename}
+              onDelete={onDelete}
+              onNewFile={onNewFile}
+              onNewFolder={onNewFolder}
+              onCopyPath={onCopyPath}
+              onDownload={onDownload}
+              onRefresh={onRefresh}
+              renamingItem={renamingItem}
+              renameValue={renameValue}
+              setRenameValue={setRenameValue}
+              handleConfirmRename={handleConfirmRename}
+              handleCancelRename={handleCancelRename}
+              renameInputRef={renameInputRef}
+              operationLoading={operationLoading}
             />
           ))}
           {!isLoadingChildren && !hasChildren && hasLoadedChildren && (

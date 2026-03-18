@@ -7,7 +7,7 @@ import {
   CURSOR_MODELS,
   GEMINI_MODELS,
 } from '../../../../shared/modelConstants';
-import type { PendingPermissionRequest, PermissionMode, Provider } from '../types/types';
+import type { PendingPermissionRequest, PermissionMode } from '../types/types';
 import type { ProjectSession, SessionProvider } from '../../../types/app';
 
 interface UseChatProviderStateArgs {

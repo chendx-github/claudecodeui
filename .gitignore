@@ -110,7 +110,7 @@ CLAUDE.md
 .mcp.json
 certs/dev-selfsigned.key
 certs/dev-selfsigned.crt
-
+.gemini/
 
 # Database files
 *.db
@@ -133,3 +133,10 @@ dev-debug.log
 tasks.json
 tasks/ 
 .worktrees/
+
+# Translations
+!src/i18n/locales/en/tasks.json
+!src/i18n/locales/ja/tasks.json
+!src/i18n/locales/ru/tasks.json
+!src/i18n/locales/de/tasks.json
+

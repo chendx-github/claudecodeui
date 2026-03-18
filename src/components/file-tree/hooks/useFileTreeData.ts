@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../../../utils/api';
 import type { Project } from '../../../types/app';
 import type { FileTreeNode } from '../types/types';
@@ -13,6 +13,7 @@ type UseFileTreeDataResult = {
   loadedDirs: Set<string>;
   loadingDirs: Set<string>;
   refreshRoot: () => Promise<void>;
+  refreshFiles: () => void;
   loadDirectoryChildren: (directoryPath: string) => Promise<void>;
 };
 
@@ -50,29 +51,48 @@ export function useFileTreeData(
   const [loading, setLoading] = useState(false);
   const [loadedDirs, setLoadedDirs] = useState<Set<string>>(() => new Set());
   const [loadingDirs, setLoadingDirs] = useState<Set<string>>(() => new Set());
+  const rootAbortControllerRef = useRef<AbortController | null>(null);
+  const loadedDirsRef = useRef(loadedDirs);
+  const loadingDirsRef = useRef(loadingDirs);
+
+  useEffect(() => {
+    loadedDirsRef.current = loadedDirs;
+  }, [loadedDirs]);
+
+  useEffect(() => {
+    loadingDirsRef.current = loadingDirs;
+  }, [loadingDirs]);
+
+  const resetTreeState = useCallback(() => {
+    setFiles([]);
+    setLoadedDirs(new Set());
+    setLoadingDirs(new Set());
+  }, []);
 
   const refreshRoot = useCallback(async () => {
     const projectName = selectedProject?.name;
 
     if (!projectName) {
-      setFiles([]);
+      rootAbortControllerRef.current?.abort();
       setLoading(false);
-      setLoadedDirs(new Set());
-      setLoadingDirs(new Set());
+      resetTreeState();
       return;
     }
+
+    rootAbortControllerRef.current?.abort();
+    const controller = new AbortController();
+    rootAbortControllerRef.current = controller;
 
     setLoading(true);
     try {
       const response = await api.listFiles(projectName, null, {
         includeIgnored,
+        signal: controller.signal,
       });
       if (!response.ok) {
         const errorText = await response.text();
         console.error('Root file fetch failed:', response.status, errorText);
-        setFiles([]);
-        setLoadedDirs(new Set());
-        setLoadingDirs(new Set());
+        resetTreeState();
         return;
       }
 
@@ -82,14 +102,22 @@ export function useFileTreeData(
       setLoadedDirs(new Set());
       setLoadingDirs(new Set());
     } catch (error) {
+      if ((error as { name?: string }).name === 'AbortError') {
+        return;
+      }
       console.error('Error fetching root files:', error);
-      setFiles([]);
-      setLoadedDirs(new Set());
-      setLoadingDirs(new Set());
+      resetTreeState();
     } finally {
+      if (rootAbortControllerRef.current === controller) {
+        rootAbortControllerRef.current = null;
+      }
       setLoading(false);
     }
-  }, [includeIgnored, selectedProject?.name]);
+  }, [includeIgnored, resetTreeState, selectedProject?.name]);
+
+  const refreshFiles = useCallback(() => {
+    void refreshRoot();
+  }, [refreshRoot]);
 
   const loadDirectoryChildren = useCallback(
     async (directoryPath: string) => {
@@ -98,7 +126,7 @@ export function useFileTreeData(
         return;
       }
 
-      if (loadedDirs.has(directoryPath) || loadingDirs.has(directoryPath)) {
+      if (loadedDirsRef.current.has(directoryPath) || loadingDirsRef.current.has(directoryPath)) {
         return;
       }
 
@@ -136,11 +164,14 @@ export function useFileTreeData(
         });
       }
     },
-    [includeIgnored, loadedDirs, loadingDirs, selectedProject?.name],
+    [includeIgnored, selectedProject?.name],
   );
 
   useEffect(() => {
     void refreshRoot();
+    return () => {
+      rootAbortControllerRef.current?.abort();
+    };
   }, [refreshRoot]);
 
   return {
@@ -149,6 +180,7 @@ export function useFileTreeData(
     loadedDirs,
     loadingDirs,
     refreshRoot,
+    refreshFiles,
     loadDirectoryChildren,
   };
 }

@@ -21,6 +21,12 @@ export const authenticatedFetch = (url, options = {}) => {
       ...defaultHeaders,
       ...options.headers,
     },
+  }).then((response) => {
+    const refreshedToken = response.headers.get('X-Refreshed-Token');
+    if (refreshedToken) {
+      localStorage.setItem('auth-token', refreshedToken);
+    }
+    return response;
   });
 };
 
@@ -103,6 +109,11 @@ export const api = {
     authenticatedFetch(`/api/projects/${projectName}/sessions/${sessionId}`, {
       method: 'DELETE',
     }),
+  renameSession: (sessionId, summary, provider) =>
+    authenticatedFetch(`/api/sessions/${sessionId}/rename`, {
+      method: 'PUT',
+      body: JSON.stringify({ summary, provider }),
+    }),
   deleteCodexSession: (sessionId) =>
     authenticatedFetch(`/api/codex/sessions/${sessionId}`, {
       method: 'DELETE',
@@ -115,6 +126,12 @@ export const api = {
     authenticatedFetch(`/api/projects/${projectName}${force ? '?force=true' : ''}`, {
       method: 'DELETE',
     }),
+  searchConversationsUrl: (query, limit = 50) => {
+    const token = localStorage.getItem('auth-token');
+    const params = new URLSearchParams({ q: query, limit: String(limit) });
+    if (token) params.set('token', token);
+    return `/api/search/conversations?${params.toString()}`;
+  },
   createProject: (path) =>
     authenticatedFetch('/api/projects/create', {
       method: 'POST',
@@ -234,6 +251,33 @@ export const api = {
     }),
   getFiles: (projectName, options = {}) =>
     authenticatedFetch(`/api/projects/${projectName}/files`, options),
+
+  // File operations
+  createFile: (projectName, { path, type, name }) =>
+    authenticatedFetch(`/api/projects/${projectName}/files/create`, {
+      method: 'POST',
+      body: JSON.stringify({ path, type, name }),
+    }),
+
+  renameFile: (projectName, { oldPath, newName }) =>
+    authenticatedFetch(`/api/projects/${projectName}/files/rename`, {
+      method: 'PUT',
+      body: JSON.stringify({ oldPath, newName }),
+    }),
+
+  deleteFile: (projectName, { path, type }) =>
+    authenticatedFetch(`/api/projects/${projectName}/files`, {
+      method: 'DELETE',
+      body: JSON.stringify({ path, type }),
+    }),
+
+  uploadFiles: (projectName, formData) =>
+    authenticatedFetch(`/api/projects/${projectName}/files/upload`, {
+      method: 'POST',
+      body: formData,
+      headers: {}, // Let browser set Content-Type for FormData
+    }),
+
   transcribe: (formData) =>
     authenticatedFetch('/api/transcribe', {
       method: 'POST',
@@ -313,4 +357,23 @@ export const api = {
 
   // Generic GET method for any endpoint
   get: (endpoint) => authenticatedFetch(`/api${endpoint}`),
+
+
+  // Generic POST method for any endpoint
+  post: (endpoint, body) => authenticatedFetch(`/api${endpoint}`, {
+    method: 'POST',
+    ...(body instanceof FormData ? { body } : { body: JSON.stringify(body) }),
+  }),
+
+  // Generic PUT method for any endpoint
+  put: (endpoint, body) => authenticatedFetch(`/api${endpoint}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  }),
+
+  // Generic DELETE method for any endpoint
+  delete: (endpoint, options = {}) => authenticatedFetch(`/api${endpoint}`, {
+    method: 'DELETE',
+    ...options,
+  }),
 };

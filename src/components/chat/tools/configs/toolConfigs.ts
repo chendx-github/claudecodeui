@@ -280,6 +280,7 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
           }
           return { todos, isResult: true };
         } catch (e) {
+          console.warn('Failed to parse todo list content:', e);
           return { todos: [], isResult: true };
         }
       }
@@ -520,6 +521,7 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
             content: parsed.plan?.replace(/\\n/g, '\n') || parsed.plan
           };
         } catch (e) {
+          console.warn('Failed to parse plan content:', e);
           return { content: '' };
         }
       }
@@ -550,6 +552,7 @@ export const TOOL_CONFIGS: Record<string, ToolDisplayConfig> = {
             content: parsed.plan?.replace(/\\n/g, '\n') || parsed.plan
           };
         } catch (e) {
+          console.warn('Failed to parse plan content:', e);
           return { content: '' };
         }
       }

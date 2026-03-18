@@ -1,5 +1,12 @@
 import express from 'express';
-import { apiKeysDb, credentialsDb } from '../database/db.js';
+import {
+  apiKeysDb,
+  credentialsDb,
+  notificationPreferencesDb,
+  pushSubscriptionsDb,
+} from '../database/db.js';
+import { getPublicKey } from '../services/vapid-keys.js';
+import { createNotificationEvent, notifyUserIfEnabled } from '../services/notification-orchestrator.js';
 import { loadUiSettings, updateUiSettings } from '../ui-settings.js';
 
 const router = express.Router();
@@ -8,14 +15,12 @@ const router = express.Router();
 // API Keys Management
 // ===============================
 
-// Get all API keys for the authenticated user
 router.get('/api-keys', async (req, res) => {
   try {
     const apiKeys = apiKeysDb.getApiKeys(req.user.id);
-    // Don't send the full API key in the list for security
-    const sanitizedKeys = apiKeys.map(key => ({
+    const sanitizedKeys = apiKeys.map((key) => ({
       ...key,
-      api_key: key.api_key.substring(0, 10) + '...'
+      api_key: key.api_key.substring(0, 10) + '...',
     }));
     res.json({ apiKeys: sanitizedKeys });
   } catch (error) {
@@ -24,7 +29,6 @@ router.get('/api-keys', async (req, res) => {
   }
 });
 
-// Create a new API key
 router.post('/api-keys', async (req, res) => {
   try {
     const { keyName } = req.body;
@@ -36,7 +40,7 @@ router.post('/api-keys', async (req, res) => {
     const result = apiKeysDb.createApiKey(req.user.id, keyName.trim());
     res.json({
       success: true,
-      apiKey: result
+      apiKey: result,
     });
   } catch (error) {
     console.error('Error creating API key:', error);
@@ -44,11 +48,10 @@ router.post('/api-keys', async (req, res) => {
   }
 });
 
-// Delete an API key
 router.delete('/api-keys/:keyId', async (req, res) => {
   try {
     const { keyId } = req.params;
-    const success = apiKeysDb.deleteApiKey(req.user.id, parseInt(keyId));
+    const success = apiKeysDb.deleteApiKey(req.user.id, parseInt(keyId, 10));
 
     if (success) {
       res.json({ success: true });
@@ -61,7 +64,6 @@ router.delete('/api-keys/:keyId', async (req, res) => {
   }
 });
 
-// Toggle API key active status
 router.patch('/api-keys/:keyId/toggle', async (req, res) => {
   try {
     const { keyId } = req.params;
@@ -71,7 +73,7 @@ router.patch('/api-keys/:keyId/toggle', async (req, res) => {
       return res.status(400).json({ error: 'isActive must be a boolean' });
     }
 
-    const success = apiKeysDb.toggleApiKey(req.user.id, parseInt(keyId), isActive);
+    const success = apiKeysDb.toggleApiKey(req.user.id, parseInt(keyId, 10), isActive);
 
     if (success) {
       res.json({ success: true });
@@ -88,12 +90,10 @@ router.patch('/api-keys/:keyId/toggle', async (req, res) => {
 // Generic Credentials Management
 // ===============================
 
-// Get all credentials for the authenticated user (optionally filtered by type)
 router.get('/credentials', async (req, res) => {
   try {
     const { type } = req.query;
     const credentials = credentialsDb.getCredentials(req.user.id, type || null);
-    // Don't send the actual credential values for security
     res.json({ credentials });
   } catch (error) {
     console.error('Error fetching credentials:', error);
@@ -101,7 +101,6 @@ router.get('/credentials', async (req, res) => {
   }
 });
 
-// Create a new credential
 router.post('/credentials', async (req, res) => {
   try {
     const { credentialName, credentialType, credentialValue, description } = req.body;
@@ -123,12 +122,12 @@ router.post('/credentials', async (req, res) => {
       credentialName.trim(),
       credentialType.trim(),
       credentialValue.trim(),
-      description?.trim() || null
+      description?.trim() || null,
     );
 
     res.json({
       success: true,
-      credential: result
+      credential: result,
     });
   } catch (error) {
     console.error('Error creating credential:', error);
@@ -136,11 +135,10 @@ router.post('/credentials', async (req, res) => {
   }
 });
 
-// Delete a credential
 router.delete('/credentials/:credentialId', async (req, res) => {
   try {
     const { credentialId } = req.params;
-    const success = credentialsDb.deleteCredential(req.user.id, parseInt(credentialId));
+    const success = credentialsDb.deleteCredential(req.user.id, parseInt(credentialId, 10));
 
     if (success) {
       res.json({ success: true });
@@ -153,7 +151,6 @@ router.delete('/credentials/:credentialId', async (req, res) => {
   }
 });
 
-// Toggle credential active status
 router.patch('/credentials/:credentialId/toggle', async (req, res) => {
   try {
     const { credentialId } = req.params;
@@ -163,7 +160,7 @@ router.patch('/credentials/:credentialId/toggle', async (req, res) => {
       return res.status(400).json({ error: 'isActive must be a boolean' });
     }
 
-    const success = credentialsDb.toggleCredential(req.user.id, parseInt(credentialId), isActive);
+    const success = credentialsDb.toggleCredential(req.user.id, parseInt(credentialId, 10), isActive);
 
     if (success) {
       res.json({ success: true });
@@ -180,13 +177,10 @@ router.patch('/credentials/:credentialId/toggle', async (req, res) => {
 // UI Preferences
 // ===============================
 
-router.get('/ui-preferences', async (req, res) => {
+router.get('/ui-preferences', async (_req, res) => {
   try {
     const preferences = await loadUiSettings();
-    res.json({
-      success: true,
-      preferences,
-    });
+    res.json({ success: true, preferences });
   } catch (error) {
     console.error('Error fetching UI preferences:', error);
     res.status(500).json({ error: 'Failed to fetch UI preferences' });
@@ -203,13 +197,105 @@ router.patch('/ui-preferences', async (req, res) => {
     }
 
     const preferences = await updateUiSettings({ codexAutoDiscoverProjects });
-    res.json({
-      success: true,
-      preferences,
-    });
+    res.json({ success: true, preferences });
   } catch (error) {
     console.error('Error updating UI preferences:', error);
     res.status(500).json({ error: 'Failed to update UI preferences' });
+  }
+});
+
+// ===============================
+// Notification Preferences
+// ===============================
+
+router.get('/notification-preferences', async (req, res) => {
+  try {
+    const preferences = notificationPreferencesDb.getPreferences(req.user.id);
+    res.json({ success: true, preferences });
+  } catch (error) {
+    console.error('Error fetching notification preferences:', error);
+    res.status(500).json({ error: 'Failed to fetch notification preferences' });
+  }
+});
+
+router.put('/notification-preferences', async (req, res) => {
+  try {
+    const preferences = notificationPreferencesDb.updatePreferences(req.user.id, req.body || {});
+    res.json({ success: true, preferences });
+  } catch (error) {
+    console.error('Error saving notification preferences:', error);
+    res.status(500).json({ error: 'Failed to save notification preferences' });
+  }
+});
+
+// ===============================
+// Push Subscription Management
+// ===============================
+
+router.get('/push/vapid-public-key', async (_req, res) => {
+  try {
+    const publicKey = getPublicKey();
+    res.json({ publicKey });
+  } catch (error) {
+    console.error('Error fetching VAPID public key:', error);
+    res.status(500).json({ error: 'Failed to fetch VAPID public key' });
+  }
+});
+
+router.post('/push/subscribe', async (req, res) => {
+  try {
+    const { endpoint, keys } = req.body;
+    if (!endpoint || !keys?.p256dh || !keys?.auth) {
+      return res.status(400).json({ error: 'Missing subscription fields' });
+    }
+
+    pushSubscriptionsDb.saveSubscription(req.user.id, endpoint, keys.p256dh, keys.auth);
+
+    const currentPrefs = notificationPreferencesDb.getPreferences(req.user.id);
+    if (!currentPrefs?.channels?.webPush) {
+      notificationPreferencesDb.updatePreferences(req.user.id, {
+        ...currentPrefs,
+        channels: { ...currentPrefs?.channels, webPush: true },
+      });
+    }
+
+    res.json({ success: true });
+
+    const event = createNotificationEvent({
+      provider: 'system',
+      kind: 'info',
+      code: 'push.enabled',
+      meta: { message: 'Push notifications are now enabled!' },
+      severity: 'info',
+    });
+    notifyUserIfEnabled({ userId: req.user.id, event });
+  } catch (error) {
+    console.error('Error saving push subscription:', error);
+    res.status(500).json({ error: 'Failed to save push subscription' });
+  }
+});
+
+router.post('/push/unsubscribe', async (req, res) => {
+  try {
+    const { endpoint } = req.body;
+    if (!endpoint) {
+      return res.status(400).json({ error: 'Missing endpoint' });
+    }
+
+    pushSubscriptionsDb.removeSubscription(endpoint);
+
+    const currentPrefs = notificationPreferencesDb.getPreferences(req.user.id);
+    if (currentPrefs?.channels?.webPush) {
+      notificationPreferencesDb.updatePreferences(req.user.id, {
+        ...currentPrefs,
+        channels: { ...currentPrefs.channels, webPush: false },
+      });
+    }
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error removing push subscription:', error);
+    res.status(500).json({ error: 'Failed to remove push subscription' });
   }
 });
 

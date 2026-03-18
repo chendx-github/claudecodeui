@@ -18,12 +18,12 @@ import {
   Terminal
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import DarkModeToggle from './DarkModeToggle';
+import DarkModeToggle from '../shared/view/ui/DarkModeToggle';
 import { CODEX_MODELS, CODEX_REASONING_LEVELS } from '../../shared/modelConstants';
 
 import { useUiPreferences } from '../hooks/useUiPreferences';
 import { useTheme } from '../contexts/ThemeContext';
-import LanguageSelector from './LanguageSelector';
+import LanguageSelector from '../shared/view/ui/LanguageSelector';
 import { authenticatedFetch } from '../utils/api';
 
 import { useDeviceSettings } from '../hooks/useDeviceSettings';

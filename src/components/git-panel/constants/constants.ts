@@ -27,19 +27,23 @@ export const FILE_STATUS_BADGE_CLASSES: Record<FileStatusCode, string> = {
 export const CONFIRMATION_TITLES: Record<ConfirmActionType, string> = {
   discard: 'Discard Changes',
   delete: 'Delete File',
-  commit: 'Confirm Commit',
+  commit: 'Confirm Action',
   pull: 'Confirm Pull',
   push: 'Confirm Push',
   publish: 'Publish Branch',
+  revertLocalCommit: 'Revert Local Commit',
+  deleteBranch: 'Delete Branch',
 };
 
 export const CONFIRMATION_ACTION_LABELS: Record<ConfirmActionType, string> = {
   discard: 'Discard',
   delete: 'Delete',
-  commit: 'Commit',
+  commit: 'Confirm',
   pull: 'Pull',
   push: 'Push',
   publish: 'Publish',
+  revertLocalCommit: 'Revert Commit',
+  deleteBranch: 'Delete',
 };
 
 export const CONFIRMATION_BUTTON_CLASSES: Record<ConfirmActionType, string> = {
@@ -49,6 +53,8 @@ export const CONFIRMATION_BUTTON_CLASSES: Record<ConfirmActionType, string> = {
   pull: 'bg-green-600 hover:bg-green-700',
   push: 'bg-orange-600 hover:bg-orange-700',
   publish: 'bg-purple-600 hover:bg-purple-700',
+  revertLocalCommit: 'bg-yellow-600 hover:bg-yellow-700',
+  deleteBranch: 'bg-red-600 hover:bg-red-700',
 };
 
 export const CONFIRMATION_ICON_CONTAINER_CLASSES: Record<ConfirmActionType, string> = {
@@ -58,6 +64,8 @@ export const CONFIRMATION_ICON_CONTAINER_CLASSES: Record<ConfirmActionType, stri
   pull: 'bg-yellow-100 dark:bg-yellow-900/30',
   push: 'bg-yellow-100 dark:bg-yellow-900/30',
   publish: 'bg-yellow-100 dark:bg-yellow-900/30',
+  revertLocalCommit: 'bg-yellow-100 dark:bg-yellow-900/30',
+  deleteBranch: 'bg-red-100 dark:bg-red-900/30',
 };
 
 export const CONFIRMATION_ICON_CLASSES: Record<ConfirmActionType, string> = {
@@ -67,4 +75,6 @@ export const CONFIRMATION_ICON_CLASSES: Record<ConfirmActionType, string> = {
   pull: 'text-yellow-600 dark:text-yellow-400',
   push: 'text-yellow-600 dark:text-yellow-400',
   publish: 'text-yellow-600 dark:text-yellow-400',
+  revertLocalCommit: 'text-yellow-600 dark:text-yellow-400',
+  deleteBranch: 'text-red-600 dark:text-red-400',
 };

@@ -48,6 +48,7 @@ interface UseChatRealtimeHandlersArgs {
   onSessionNotProcessing?: (sessionId?: string | null) => void;
   onReplaceTemporarySession?: (sessionId?: string | null) => void;
   onNavigateToSession?: (sessionId: string) => void;
+  onWebSocketReconnect?: () => void;
 }
 
 const appendStreamingChunk = (
@@ -140,6 +141,7 @@ export function useChatRealtimeHandlers({
   onSessionNotProcessing,
   onReplaceTemporarySession,
   onNavigateToSession,
+  onWebSocketReconnect,
 }: UseChatRealtimeHandlersArgs) {
   const lastProcessedMessageRef = useRef<LatestChatMessage | null>(null);
 
@@ -161,9 +163,10 @@ export function useChatRealtimeHandlers({
       latestMessage.data && typeof latestMessage.data === 'object'
         ? (latestMessage.data as Record<string, any>)
         : null;
+    const messageType = String(latestMessage.type);
 
-    const globalMessageTypes = ['projects_updated', 'taskmaster-project-updated', 'session-created'];
-    const isGlobalMessage = globalMessageTypes.includes(String(latestMessage.type));
+    const globalMessageTypes = ['projects_updated', 'taskmaster-project-updated', 'session-created', 'websocket-reconnected'];
+    const isGlobalMessage = globalMessageTypes.includes(messageType);
     const lifecycleMessageTypes = new Set([
       'claude-complete',
       'codex-complete',
@@ -173,6 +176,7 @@ export function useChatRealtimeHandlers({
       'cursor-error',
       'codex-error',
       'gemini-error',
+      'error',
     ]);
 
     const isClaudeSystemInit =
@@ -195,9 +199,12 @@ export function useChatRealtimeHandlers({
 
     const activeViewSessionId =
       selectedSession?.id || currentSessionId || pendingViewSessionRef.current?.sessionId || null;
+    const hasPendingUnboundSession =
+      Boolean(pendingViewSessionRef.current) && !pendingViewSessionRef.current?.sessionId;
     const isSystemInitForView =
       systemInitSessionId && (!activeViewSessionId || systemInitSessionId === activeViewSessionId);
     const shouldBypassSessionFilter = isGlobalMessage || Boolean(isSystemInitForView);
+    const isLifecycleMessage = lifecycleMessageTypes.has(messageType);
     const isUnscopedError =
       !latestMessage.sessionId &&
       pendingViewSessionRef.current &&
@@ -228,6 +235,30 @@ export function useChatRealtimeHandlers({
       setClaudeStatus(null);
     };
 
+    const clearPendingViewSession = (resolvedSessionId?: string | null) => {
+      const pendingSession = pendingViewSessionRef.current;
+      if (!pendingSession) {
+        return;
+      }
+
+      // If the in-view request never received a concrete session ID (or this terminal event
+      // resolves the same pending session), clear it to avoid stale "in-flight" UI state.
+      if (!pendingSession.sessionId || !resolvedSessionId || pendingSession.sessionId === resolvedSessionId) {
+        pendingViewSessionRef.current = null;
+      }
+    };
+
+    const flushStreamingState = () => {
+      if (streamTimerRef.current) {
+        clearTimeout(streamTimerRef.current);
+        streamTimerRef.current = null;
+      }
+      const pendingChunk = streamBufferRef.current;
+      streamBufferRef.current = '';
+      appendStreamingChunk(setChatMessages, pendingChunk, false);
+      finalizeStreamingMessage(setChatMessages);
+    };
+
     const markSessionsAsCompleted = (...sessionIds: Array<string | null | undefined>) => {
       const normalizedSessionIds = collectSessionIds(...sessionIds);
       normalizedSessionIds.forEach((sessionId) => {
@@ -236,25 +267,46 @@ export function useChatRealtimeHandlers({
       });
     };
 
+    const finalizeLifecycleForCurrentView = (...sessionIds: Array<string | null | undefined>) => {
+      const pendingSessionId = typeof window !== 'undefined' ? sessionStorage.getItem('pendingSessionId') : null;
+      const resolvedSessionIds = collectSessionIds(...sessionIds, pendingSessionId, pendingViewSessionRef.current?.sessionId);
+      const resolvedPrimarySessionId = resolvedSessionIds[0] || null;
+
+      flushStreamingState();
+      clearLoadingIndicators();
+      markSessionsAsCompleted(...resolvedSessionIds);
+      setPendingPermissionRequests([]);
+      clearPendingViewSession(resolvedPrimarySessionId);
+    };
+
     if (!shouldBypassSessionFilter) {
       if (!activeViewSessionId) {
-        if (latestMessage.sessionId && lifecycleMessageTypes.has(String(latestMessage.type))) {
+        if (latestMessage.sessionId && isLifecycleMessage && !hasPendingUnboundSession) {
           handleBackgroundLifecycle(latestMessage.sessionId);
+          return;
         }
-        if (!isUnscopedError) {
+        if (!isUnscopedError && !hasPendingUnboundSession) {
           return;
         }
       }
 
-      if (!latestMessage.sessionId && !isUnscopedError) {
+      if (!latestMessage.sessionId && !isUnscopedError && !hasPendingUnboundSession) {
         return;
       }
 
       if (latestMessage.sessionId !== activeViewSessionId) {
-        if (latestMessage.sessionId && lifecycleMessageTypes.has(String(latestMessage.type))) {
-          handleBackgroundLifecycle(latestMessage.sessionId);
+        const shouldTreatAsPendingViewLifecycle =
+          !activeViewSessionId &&
+          hasPendingUnboundSession &&
+          latestMessage.sessionId &&
+          isLifecycleMessage;
+
+        if (!shouldTreatAsPendingViewLifecycle) {
+          if (latestMessage.sessionId && isLifecycleMessage) {
+            handleBackgroundLifecycle(latestMessage.sessionId);
+          }
+          return;
         }
-        return;
       }
     }
 
@@ -275,6 +327,11 @@ export function useChatRealtimeHandlers({
             ),
           );
         }
+        break;
+
+      case 'websocket-reconnected':
+        // WebSocket dropped and reconnected — re-fetch session history to catch up on missed messages
+        onWebSocketReconnect?.();
         break;
 
       case 'token-budget':
@@ -581,6 +638,7 @@ export function useChatRealtimeHandlers({
         break;
 
       case 'claude-error':
+        finalizeLifecycleForCurrentView(latestMessage.sessionId, currentSessionId, selectedSession?.id);
         setChatMessages((previous) => [
           ...previous,
           {
@@ -640,6 +698,7 @@ export function useChatRealtimeHandlers({
         break;
 
       case 'cursor-error':
+        finalizeLifecycleForCurrentView(latestMessage.sessionId, currentSessionId, selectedSession?.id);
         setChatMessages((previous) => [
           ...previous,
           {
@@ -654,8 +713,7 @@ export function useChatRealtimeHandlers({
         const cursorCompletedSessionId = latestMessage.sessionId || currentSessionId;
         const pendingCursorSessionId = sessionStorage.getItem('pendingSessionId');
 
-        clearLoadingIndicators();
-        markSessionsAsCompleted(
+        finalizeLifecycleForCurrentView(
           cursorCompletedSessionId,
           currentSessionId,
           selectedSession?.id,
@@ -677,14 +735,28 @@ export function useChatRealtimeHandlers({
             const updated = [...previous];
             const lastIndex = updated.length - 1;
             const last = updated[lastIndex];
+            const normalizedTextResult = textResult.trim();
+
             if (last && last.type === 'assistant' && !last.isToolUse && last.isStreaming) {
               const finalContent =
-                textResult && textResult.trim()
+                normalizedTextResult
                   ? textResult
                   : `${last.content || ''}${pendingChunk || ''}`;
               // Clone the message instead of mutating in place so React can reliably detect state updates.
               updated[lastIndex] = { ...last, content: finalContent, isStreaming: false };
-            } else if (textResult && textResult.trim()) {
+            } else if (normalizedTextResult) {
+              const lastAssistantText =
+                last && last.type === 'assistant' && !last.isToolUse
+                  ? String(last.content || '').trim()
+                  : '';
+
+              // Cursor can emit the same final text through both streaming and result payloads.
+              // Skip adding a second assistant bubble when the final text is unchanged.
+              const isDuplicateFinalText = lastAssistantText === normalizedTextResult;
+              if (isDuplicateFinalText) {
+                return updated;
+              }
+
               updated.push({
                 type: resultData.is_error ? 'error' : 'assistant',
                 content: textResult,
@@ -737,8 +809,7 @@ export function useChatRealtimeHandlers({
         const completedSessionId =
           latestMessage.sessionId || currentSessionId || pendingSessionId;
 
-        clearLoadingIndicators();
-        markSessionsAsCompleted(
+        finalizeLifecycleForCurrentView(
           completedSessionId,
           currentSessionId,
           selectedSession?.id,
@@ -754,7 +825,6 @@ export function useChatRealtimeHandlers({
         if (selectedProject && latestMessage.exitCode === 0) {
           safeLocalStorage.removeItem(`chat_messages_${selectedProject.name}`);
         }
-        setPendingPermissionRequests([]);
         break;
       }
 
@@ -893,13 +963,11 @@ export function useChatRealtimeHandlers({
         }
 
         if (codexData.type === 'turn_complete') {
-          clearLoadingIndicators();
-          markSessionsAsCompleted(latestMessage.sessionId, currentSessionId, selectedSession?.id);
+          finalizeLifecycleForCurrentView(latestMessage.sessionId, currentSessionId, selectedSession?.id);
         }
 
         if (codexData.type === 'turn_failed') {
-          clearLoadingIndicators();
-          markSessionsAsCompleted(latestMessage.sessionId, currentSessionId, selectedSession?.id);
+          finalizeLifecycleForCurrentView(latestMessage.sessionId, currentSessionId, selectedSession?.id);
           setChatMessages((previous) => [
             ...previous,
             {
@@ -918,8 +986,7 @@ export function useChatRealtimeHandlers({
         const codexCompletedSessionId =
           latestMessage.sessionId || currentSessionId || codexPendingSessionId;
 
-        clearLoadingIndicators();
-        markSessionsAsCompleted(
+        finalizeLifecycleForCurrentView(
           codexCompletedSessionId,
           codexActualSessionId,
           currentSessionId,
@@ -943,8 +1010,7 @@ export function useChatRealtimeHandlers({
       }
 
       case 'codex-error':
-        setIsLoading(false);
-        setCanAbortSession(false);
+        finalizeLifecycleForCurrentView(latestMessage.sessionId, currentSessionId, selectedSession?.id);
         setChatMessages((previous) => [
           ...previous,
           {
@@ -994,8 +1060,7 @@ export function useChatRealtimeHandlers({
       }
 
       case 'gemini-error':
-        setIsLoading(false);
-        setCanAbortSession(false);
+        finalizeLifecycleForCurrentView(latestMessage.sessionId, currentSessionId, selectedSession?.id);
         setChatMessages((previous) => [
           ...previous,
           {
@@ -1047,13 +1112,11 @@ export function useChatRealtimeHandlers({
         const abortSucceeded = latestMessage.success !== false;
 
         if (abortSucceeded) {
-          clearLoadingIndicators();
-          markSessionsAsCompleted(abortedSessionId, currentSessionId, selectedSession?.id, pendingSessionId);
+          finalizeLifecycleForCurrentView(abortedSessionId, currentSessionId, selectedSession?.id, pendingSessionId);
           if (pendingSessionId && (!abortedSessionId || pendingSessionId === abortedSessionId)) {
             sessionStorage.removeItem('pendingSessionId');
           }
 
-          setPendingPermissionRequests([]);
           setChatMessages((previous) => [
             ...previous,
             {
@@ -1136,6 +1199,25 @@ export function useChatRealtimeHandlers({
         setCanAbortSession(statusInfo.can_interrupt);
         break;
       }
+
+      case 'pending-permissions-response': {
+        // Server returned pending permissions for this session
+        const permSessionId = latestMessage.sessionId;
+        const isCurrentPermSession =
+          permSessionId === currentSessionId || (selectedSession && permSessionId === selectedSession.id);
+        if (permSessionId && !isCurrentPermSession) {
+          break;
+        }
+        const serverRequests = latestMessage.data || [];
+        setPendingPermissionRequests(serverRequests);
+        break;
+      }
+
+      case 'error':
+        // Generic backend failure (e.g., provider process failed before a provider-specific
+        // completion event was emitted). Treat it as terminal for current view lifecycle.
+        finalizeLifecycleForCurrentView(latestMessage.sessionId, currentSessionId, selectedSession?.id);
+        break;
 
       default:
         break;

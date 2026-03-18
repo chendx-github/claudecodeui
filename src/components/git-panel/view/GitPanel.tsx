@@ -1,8 +1,11 @@
 import { useCallback, useState } from 'react';
 import { useGitPanelController } from '../hooks/useGitPanelController';
+import { useRevertLocalCommit } from '../hooks/useRevertLocalCommit';
 import type { ConfirmationRequest, GitPanelProps, GitPanelView } from '../types/types';
+import { getChangedFileCount } from '../utils/gitPanelUtils';
 import ChangesView from '../view/changes/ChangesView';
 import HistoryView from '../view/history/HistoryView';
+import BranchesView from '../view/branches/BranchesView';
 import GitPanelHeader from '../view/GitPanelHeader';
 import GitRepositoryErrorState from '../view/GitRepositoryErrorState';
 import GitViewTabs from '../view/GitViewTabs';
@@ -20,6 +23,8 @@ export default function GitPanel({ selectedProject, isMobile = false, onFileOpen
     isLoading,
     currentBranch,
     branches,
+    localBranches,
+    remoteBranches,
     recentCommits,
     commitDiffs,
     remoteStatus,
@@ -29,9 +34,12 @@ export default function GitPanel({ selectedProject, isMobile = false, onFileOpen
     isPushing,
     isPublishing,
     isCreatingInitialCommit,
+    operationError,
+    clearOperationError,
     refreshAll,
     switchBranch,
     createBranch,
+    deleteBranch,
     handleFetch,
     handlePull,
     handlePush,
@@ -49,14 +57,15 @@ export default function GitPanel({ selectedProject, isMobile = false, onFileOpen
     onFileOpen,
   });
 
-  const executeConfirmedAction = useCallback(async () => {
-    if (!confirmAction) {
-      return;
-    }
+  const { isRevertingLocalCommit, revertLatestLocalCommit } = useRevertLocalCommit({
+    projectName: selectedProject?.name ?? null,
+    onSuccess: refreshAll,
+  });
 
+  const executeConfirmedAction = useCallback(async () => {
+    if (!confirmAction) return;
     const actionToExecute = confirmAction;
     setConfirmAction(null);
-
     try {
       await actionToExecute.onConfirm();
     } catch (error) {
@@ -64,16 +73,18 @@ export default function GitPanel({ selectedProject, isMobile = false, onFileOpen
     }
   }, [confirmAction]);
 
+  const changeCount = getChangedFileCount(gitStatus);
+
   if (!selectedProject) {
     return (
-      <div className="h-full flex items-center justify-center text-muted-foreground">
+      <div className="flex h-full items-center justify-center text-muted-foreground">
         <p>Select a project to view source control</p>
       </div>
     );
   }
 
   return (
-    <div className="h-full flex flex-col bg-background">
+    <div className="flex h-full flex-col bg-background">
       <GitPanelHeader
         isMobile={isMobile}
         currentBranch={currentBranch}
@@ -85,13 +96,17 @@ export default function GitPanel({ selectedProject, isMobile = false, onFileOpen
         isPulling={isPulling}
         isPushing={isPushing}
         isPublishing={isPublishing}
+        isRevertingLocalCommit={isRevertingLocalCommit}
+        operationError={operationError}
         onRefresh={refreshAll}
+        onRevertLocalCommit={revertLatestLocalCommit}
         onSwitchBranch={switchBranch}
         onCreateBranch={createBranch}
         onFetch={handleFetch}
         onPull={handlePull}
         onPush={handlePush}
         onPublish={handlePublish}
+        onClearError={clearOperationError}
         onRequestConfirmation={setConfirmAction}
       />
 
@@ -102,12 +117,15 @@ export default function GitPanel({ selectedProject, isMobile = false, onFileOpen
           <GitViewTabs
             activeView={activeView}
             isHidden={hasExpandedFiles}
+            changeCount={changeCount}
             onChange={setActiveView}
           />
 
           {activeView === 'changes' && (
             <ChangesView
+              key={selectedProject.fullPath}
               isMobile={isMobile}
+              projectPath={selectedProject.fullPath}
               gitStatus={gitStatus}
               gitDiff={gitDiff}
               isLoading={isLoading}
@@ -133,6 +151,22 @@ export default function GitPanel({ selectedProject, isMobile = false, onFileOpen
               commitDiffs={commitDiffs}
               wrapText={wrapText}
               onFetchCommitDiff={fetchCommitDiff}
+            />
+          )}
+
+          {activeView === 'branches' && (
+            <BranchesView
+              isMobile={isMobile}
+              isLoading={isLoading}
+              currentBranch={currentBranch}
+              localBranches={localBranches}
+              remoteBranches={remoteBranches}
+              remoteStatus={remoteStatus}
+              isCreatingBranch={isCreatingBranch}
+              onSwitchBranch={switchBranch}
+              onCreateBranch={createBranch}
+              onDeleteBranch={deleteBranch}
+              onRequestConfirmation={setConfirmAction}
             />
           )}
         </>

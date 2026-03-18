@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { MutableRefObject } from 'react';
-
 import { api, authenticatedFetch } from '../../../utils/api';
 import type { ChatMessage, Provider, TokenBudget } from '../types/types';
 import type { Project, ProjectSession } from '../../../types/app';
@@ -125,6 +124,8 @@ export function useChatSessionState({
   const [showLoadAllOverlay, setShowLoadAllOverlay] = useState(false);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const [searchTarget, setSearchTarget] = useState<{ timestamp?: string; uuid?: string; snippet?: string } | null>(null);
+  const searchScrollActiveRef = useRef(false);
   const isLoadingSessionRef = useRef(false);
   const isLoadingMoreRef = useRef(false);
   const allMessagesLoadedRef = useRef(false);
@@ -136,6 +137,7 @@ export function useChatSessionState({
   const loadAllFinishedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadAllOverlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previousSelectedSessionIdRef = useRef<string | null>(selectedSession?.id || null);
+  const lastLoadedSessionKeyRef = useRef<string | null>(null);
 
   const createDiff = useMemo<DiffCalculator>(() => createCachedDiffCalculator(), []);
 
@@ -402,11 +404,18 @@ export function useChatSessionState({
     pendingScrollRestoreRef.current = null;
   }, [chatMessages.length]);
 
+  const prevSessionMessagesLengthRef = useRef(0);
+  const isInitialLoadRef = useRef(true);
+
   useEffect(() => {
-    pendingInitialScrollRef.current = true;
+    if (!searchScrollActiveRef.current) {
+      pendingInitialScrollRef.current = true;
+      setVisibleMessageCount(INITIAL_VISIBLE_MESSAGES);
+    }
     topLoadLockRef.current = false;
     pendingScrollRestoreRef.current = null;
-    setVisibleMessageCount(INITIAL_VISIBLE_MESSAGES);
+    prevSessionMessagesLengthRef.current = 0;
+    isInitialLoadRef.current = true;
     setIsUserScrolledUp(false);
   }, [selectedProject?.name, selectedSession?.id]);
 
@@ -421,9 +430,11 @@ export function useChatSessionState({
     }
 
     pendingInitialScrollRef.current = false;
-    setTimeout(() => {
-      scrollToBottom();
-    }, 200);
+    if (!searchScrollActiveRef.current) {
+      setTimeout(() => {
+        scrollToBottom();
+      }, 200);
+    }
   }, [chatMessages.length, isLoadingSessionMessages, scrollToBottom]);
 
   useEffect(() => {
@@ -459,6 +470,15 @@ export function useChatSessionState({
           }
         }
 
+        // Skip loading if session+project+provider hasn't changed
+        const sessionKey = `${selectedSession.id}:${selectedProject.name}:${provider}`;
+        if (lastLoadedSessionKeyRef.current === sessionKey) {
+          setTimeout(() => {
+            isLoadingSessionRef.current = false;
+          }, 250);
+          return;
+        }
+
         if (provider === 'cursor') {
           setCurrentSessionId(selectedSession.id);
           sessionStorage.setItem('cursorSessionId', selectedSession.id);
@@ -486,10 +506,21 @@ export function useChatSessionState({
             setIsSystemSessionChange(false);
           }
         }
+
+        // Update the last loaded session key
+        lastLoadedSessionKeyRef.current = sessionKey;
       } else {
         if (!isSystemSessionChange) {
           resetSessionViewState();
         }
+
+        setCurrentSessionId(null);
+        sessionStorage.removeItem('cursorSessionId');
+        messagesOffsetRef.current = 0;
+        setHasMoreMessages(false);
+        setTotalMessages(0);
+        setTokenBudget(null);
+        lastLoadedSessionKeyRef.current = null;
       }
 
       setTimeout(() => {
@@ -506,7 +537,7 @@ export function useChatSessionState({
     pendingViewSessionRef,
     resetSessionViewState,
     selectedProject,
-    selectedSession,
+    selectedSession?.id, // Only depend on session ID, not the entire object
     sendMessage,
     ws,
   ]);
@@ -557,6 +588,22 @@ export function useChatSessionState({
     selectedSession,
   ]);
 
+  // Detect search navigation target from selectedSession object reference change
+  // This must be a separate effect because the loading effect depends on selectedSession?.id
+  // which doesn't change when clicking a search result for the already-loaded session
+  useEffect(() => {
+    const session = selectedSession as Record<string, unknown> | null;
+    const targetSnippet = session?.__searchTargetSnippet;
+    const targetTimestamp = session?.__searchTargetTimestamp;
+    if (typeof targetSnippet === 'string' && targetSnippet) {
+      searchScrollActiveRef.current = true;
+      setSearchTarget({
+        snippet: targetSnippet,
+        timestamp: typeof targetTimestamp === 'string' ? targetTimestamp : undefined,
+      });
+    }
+  }, [selectedSession]);
+
   useEffect(() => {
     if (selectedSession?.id) {
       pendingViewSessionRef.current = null;
@@ -581,6 +628,110 @@ export function useChatSessionState({
       safeLocalStorage.setItem(`chat_messages_${selectedProject.name}`, JSON.stringify(chatMessages));
     }
   }, [chatMessages, selectedProject]);
+
+  // Scroll to search target message after messages are loaded
+  useEffect(() => {
+    if (!searchTarget || chatMessages.length === 0 || isLoadingSessionMessages) return;
+
+    const target = searchTarget;
+    // Clear immediately to prevent re-triggering
+    setSearchTarget(null);
+
+    const scrollToTarget = async () => {
+      // Always load all messages when navigating from search
+      // (hasMoreMessages may not be set yet due to race with loading effect)
+      if (!allMessagesLoadedRef.current && selectedSession && selectedProject) {
+        const sessionProvider = selectedSession.__provider || 'claude';
+        if (sessionProvider !== 'cursor') {
+          try {
+            const response = await (api.sessionMessages as any)(
+              selectedProject.name,
+              selectedSession.id,
+              null,
+              0,
+              sessionProvider,
+            );
+            if (response.ok) {
+              const data = await response.json();
+              const allMessages = data.messages || data;
+              setSessionMessages(Array.isArray(allMessages) ? allMessages : []);
+              setHasMoreMessages(false);
+              setTotalMessages(Array.isArray(allMessages) ? allMessages.length : 0);
+              messagesOffsetRef.current = Array.isArray(allMessages) ? allMessages.length : 0;
+              setVisibleMessageCount(Infinity);
+              setAllMessagesLoaded(true);
+              allMessagesLoadedRef.current = true;
+              // Wait for messages to render after state update
+              await new Promise(resolve => setTimeout(resolve, 300));
+            }
+          } catch {
+            // Fall through and scroll in current messages
+          }
+        }
+      }
+      setVisibleMessageCount(Infinity);
+
+      // Retry finding the element in the DOM until React finishes rendering all messages
+      const findAndScroll = (retriesLeft: number) => {
+        const container = scrollContainerRef.current;
+        if (!container) return;
+
+        let targetElement: Element | null = null;
+
+        // Match by snippet text content (most reliable)
+        if (target.snippet) {
+          const cleanSnippet = target.snippet.replace(/^\.{3}/, '').replace(/\.{3}$/, '').trim();
+          // Use a contiguous substring from the snippet (don't filter words, it breaks matching)
+          const searchPhrase = cleanSnippet.slice(0, 80).toLowerCase().trim();
+
+          if (searchPhrase.length >= 10) {
+            const messageElements = container.querySelectorAll('.chat-message');
+            for (const el of messageElements) {
+              const text = (el.textContent || '').toLowerCase();
+              if (text.includes(searchPhrase)) {
+                targetElement = el;
+                break;
+              }
+            }
+          }
+        }
+
+        // Fallback to timestamp matching
+        if (!targetElement && target.timestamp) {
+          const targetDate = new Date(target.timestamp).getTime();
+          const messageElements = container.querySelectorAll('[data-message-timestamp]');
+          let closestDiff = Infinity;
+
+          for (const el of messageElements) {
+            const ts = el.getAttribute('data-message-timestamp');
+            if (!ts) continue;
+            const diff = Math.abs(new Date(ts).getTime() - targetDate);
+            if (diff < closestDiff) {
+              closestDiff = diff;
+              targetElement = el;
+            }
+          }
+        }
+
+        if (targetElement) {
+          targetElement.scrollIntoView({ block: 'center', behavior: 'smooth' });
+          targetElement.classList.add('search-highlight-flash');
+          setTimeout(() => targetElement?.classList.remove('search-highlight-flash'), 4000);
+          searchScrollActiveRef.current = false;
+        } else if (retriesLeft > 0) {
+          setTimeout(() => findAndScroll(retriesLeft - 1), 200);
+        } else {
+          searchScrollActiveRef.current = false;
+        }
+      };
+
+      // Start polling after a short delay to let React begin rendering
+      setTimeout(() => findAndScroll(15), 150);
+    };
+
+    scrollToTarget();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chatMessages.length, isLoadingSessionMessages, searchTarget]);
 
   useEffect(() => {
     if (!selectedProject || !selectedSession?.id || selectedSession.id.startsWith('new-session-')) {
@@ -643,6 +794,10 @@ export function useChatSessionState({
     }
 
     if (isLoadingMoreRef.current || isLoadingMoreMessages || pendingScrollRestoreRef.current) {
+      return;
+    }
+
+    if (searchScrollActiveRef.current) {
       return;
     }
 
